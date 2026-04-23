@@ -1,0 +1,14 @@
+[package]
+name = "dns-resolver-recommender"
+version = "0.1.0"
+edition = "2024"
+authors = [
+    "Jhannes Reimann <jhannes.reimann@student.hpi.uni-potsdam.de>",
+    "Robert Richter <robert.richter@hpi.de"
+]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
