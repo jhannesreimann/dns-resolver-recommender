@@ -38,13 +38,13 @@
 
             # A handy welcome message when you enter the shell
             shellHook = ''
-              alias build="wasm-pack build --target web"
-              alias server="python3 -m http.server"
+              alias build="cd src/wasm && wasm-pack build --target web && cd ../.."
+              alias server="python3 -m http.server 8000"
 
-              echo "🦀 WebAssembly Dev Environment Loaded! 🦀"
+              echo "WebAssembly Dev Environment Loaded"
               echo "Available commands:"
-              echo "  - wasm-pack build --target web"
-              echo "  - python3 -m http.server"
+              echo "  build   -> wasm-pack build in src/wasm/"
+              echo "  server  -> python3 http.server on port 8000"
             '';
           };
         }

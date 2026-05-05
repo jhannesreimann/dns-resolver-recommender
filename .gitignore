@@ -1,2 +1,26 @@
-/target
-pkg
+# Rust / Wasm
+target/
+pkg/
+Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node / Frontend
+node_modules/
+dist/
+build/
+.parcel-cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
