@@ -1,0 +1,22 @@
+[Unit]
+Description=DNS Resolver Recommender backend (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dnsrr
+Group=dnsrr
+WorkingDirectory=/opt/dnsrr/backend
+EnvironmentFile=/etc/dnsrr/dnsrr.env
+ExecStart=/opt/dnsrr/backend/.venv/bin/python -m dnsrr
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/dnsrr
+
+[Install]
+WantedBy=multi-user.target

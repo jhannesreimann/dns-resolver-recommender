@@ -16,6 +16,13 @@ dist/
 build/
 .parcel-cache/
 
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
 # OS
 .DS_Store
 Thumbs.db

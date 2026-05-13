@@ -11,21 +11,20 @@ Supervisor: Robert Richter.
 ```
 src/
   wasm/        Rust crate compiled to WebAssembly (DoH measurement engine)
-  frontend/    React web application (UI, results display)
-  backend/     Python telemetry API (anonymisation, data storage)
-  dns-server/  Custom authoritative DNS server for uncached measurements
+  frontend/    Web application (UI, results display)
+  backend/     Python API (Cloudflare DNS rotation, telemetry, anonymisation)
 docs/
-  research/    Background research notes and literature
   proposal/    Course proposal presentation and supporting materials
-deploy/        Server configuration and deployment scripts
+deploy/        Nginx config and systemd unit files
 flake.nix      Nix development environment
 ```
 
 ## Infrastructure
 
-- **Frontend/API host:** dns.diic-hpi.org (Hetzner VM, Nuremberg)
-- **Authoritative DNS:** ns1.dns.diic-hpi.org -> 46.225.184.21
-- **Measurement subdomain:** measure.dns.diic-hpi.org (delegated to VM port 53)
+Frontend and API are served from `dns.diic-hpi.org` on a Hetzner VM in Nuremberg.
+Uncached DoH measurements use fresh `<uuid>.diic-hpi.org` subdomains created on
+demand via the Cloudflare API. Cloudflare's anycasted nameservers handle the
+authoritative answer, so latencies stay realistic for users worldwide.
 
 ## Development Setup
 
@@ -52,5 +51,5 @@ python3 -m http.server 8000
 
 1. How can we do DNS in the web? (JS, JS libs, Wasm?)
 2. What protocols can we use for DNS in the web?
-3. How can we do cached vs. uncached DNS in the web using a custom authoritative resolver?
+3. How can we do cached vs. uncached DNS in the web?
 4. How can we collect user telemetry data in a GDPR-compliant way?

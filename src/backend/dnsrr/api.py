@@ -1,0 +1,118 @@
+"""HTTP API for the DNS Resolver Recommender backend."""
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from .cloudflare import CloudflareClient, CloudflareError
+from .config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
+
+
+class RotateResponse(BaseModel):
+    """Response payload for POST /api/dns/rotate."""
+
+    domain: str = Field(..., description="Newly created subdomain (FQDN).")
+    record_id: str = Field(..., description="Cloudflare record ID, used for cleanup.")
+    ttl: int = Field(..., description="DNS TTL the record was created with.")
+
+
+class HealthResponse(BaseModel):
+    status: str
+    zone: str
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    client = CloudflareClient(
+        api_key=settings.cloudflare_api_key,
+        zone_id=settings.zone_id,
+    )
+    app.state.cloudflare = client
+    try:
+        yield
+    finally:
+        await client.aclose()
+
+
+def create_app() -> FastAPI:
+    """FastAPI application factory."""
+    settings = get_settings()
+    app = FastAPI(
+        title="DNS Resolver Recommender API",
+        version="0.1.0",
+        lifespan=_lifespan,
+    )
+
+    origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type"],
+    )
+
+    def _client() -> CloudflareClient:
+        return app.state.cloudflare
+
+    @app.get("/api/health", response_model=HealthResponse)
+    async def health(s: Settings = Depends(get_settings)) -> HealthResponse:
+        return HealthResponse(status="ok", zone=s.zone_domain)
+
+    @app.post(
+        "/api/dns/rotate",
+        response_model=RotateResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def rotate(
+        cf: CloudflareClient = Depends(_client),
+        s: Settings = Depends(get_settings),
+    ) -> RotateResponse:
+        name = CloudflareClient.random_subdomain(s.zone_domain)
+        try:
+            record = await cf.create_a_record(
+                name=name,
+                target_ip=s.rotation_target_ip,
+                ttl=s.rotation_ttl_seconds,
+                comment=s.record_comment,
+            )
+        except CloudflareError as exc:
+            logger.exception("Cloudflare rotate failed")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+
+        return RotateResponse(
+            domain=record.name,
+            record_id=record.record_id,
+            ttl=record.ttl,
+        )
+
+    @app.delete("/api/dns/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_record(
+        record_id: str,
+        cf: CloudflareClient = Depends(_client),
+    ) -> None:
+        try:
+            await cf.delete_record(record_id)
+        except CloudflareError as exc:
+            logger.exception("Cloudflare delete failed for %s", record_id)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+
+    return app
+
+
+app = create_app()
