@@ -19,7 +19,7 @@ impl MeasurementResult {
     }
 }
 
-/// Measures a single DoH POST request.
+/// Measures a single DoH request.
 /// Returns latency in ms and "ok" if NOERROR and an A record was returned.
 #[wasm_bindgen]
 pub async fn measure_resolver(
@@ -39,16 +39,26 @@ pub async fn measure_resolver(
     let query_bytes = msg.to_vec()
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize query: {}", e)))?;
 
-    // 2. Prepare HTTP POST Request
+    // 2. Prepare HTTP GET Request
+    // Since Google and Quad9 don't support OPTIONS for CORS preflight on POST correctly,
+    // we use GET requests with base64url encoded DNS query payload (RFC 8484).
+    
+    // Base64URL encode without padding
+    let base64_str = base64_url::encode(&query_bytes);
+    
+    let mut url = doh_url.clone();
+    if url.contains('?') {
+        url = format!("{}&dns={}", url, base64_str);
+    } else {
+        url = format!("{}?dns={}", url, base64_str);
+    }
+
     let mut opts = RequestInit::new();
-    opts.set_method("POST");
+    opts.set_method("GET");
     opts.set_mode(RequestMode::Cors);
+    opts.set_credentials(web_sys::RequestCredentials::Omit);
 
-    let uint8_arr = Uint8Array::from(query_bytes.as_slice());
-    opts.set_body(&uint8_arr.into());
-
-    let request = Request::new_with_str_and_init(&doh_url, &opts)?;
-    request.headers().set("Content-Type", "application/dns-message")?;
+    let request = Request::new_with_str_and_init(&url, &opts)?;
     request.headers().set("Accept", "application/dns-message")?;
 
     let window = web_sys::window().ok_or("No window available")?;
