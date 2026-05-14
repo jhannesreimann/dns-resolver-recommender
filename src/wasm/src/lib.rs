@@ -39,10 +39,6 @@ pub async fn measure_resolver(
     let query_bytes = msg.to_vec()
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize query: {}", e)))?;
 
-    // 2. Prepare HTTP GET Request
-    // Since Google and Quad9 don't support OPTIONS for CORS preflight on POST correctly,
-    // we use GET requests with base64url encoded DNS query payload (RFC 8484).
-    
     // Base64URL encode without padding
     let base64_str = base64_url::encode(&query_bytes);
     
@@ -60,6 +56,8 @@ pub async fn measure_resolver(
 
     let request = Request::new_with_str_and_init(&url, &opts)?;
     request.headers().set("Accept", "application/dns-message")?;
+    // Add cache bursting to prevent the browser from caching the OPTIONS or GET request
+    request.headers().set("Cache-Control", "no-cache")?;
 
     let window = web_sys::window().ok_or("No window available")?;
     
