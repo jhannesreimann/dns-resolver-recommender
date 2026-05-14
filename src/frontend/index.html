@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DNS Resolver Recommender</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+        h1 { color: #2c3e50; }
+        button { background: #3498db; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; }
+        button:disabled { background: #95a5a6; cursor: not-allowed; }
+        .telemetry { margin: 20px 0; font-size: 14px; color: #555; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f9fa; }
+        .status { font-family: monospace; }
+        #progress { margin-top: 20px; font-style: italic; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>DNS Resolver Recommender</h1>
+    <p>Measure and compare public DNS-over-HTTPS (DoH) resolvers directly from your browser to find the fastest option for your connection.</p>
+    
+    <div class="telemetry">
+        <label>
+            <input type="checkbox" id="opt-in-telemetry">
+            Opt-in to share anonymized measurement results (latency, ASN, region) with HPI for research purposes.
+        </label>
+    </div>
+
+    <button id="start-btn">Start Measurement</button>
+    <div id="progress"></div>
+
+    <table id="results-table" style="display: none;">
+        <thead>
+            <tr>
+                <th>Resolver</th>
+                <th>Cached (ms)</th>
+                <th>Uncached (ms)</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+    </table>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
