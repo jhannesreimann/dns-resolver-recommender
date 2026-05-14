@@ -3,7 +3,7 @@ import init, { measure_resolver } from './wasm/pkg/dns_resolver_recommender.js';
 const RESOLVERS = [
     { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query" },
     { name: "Google", url: "https://dns.google/dns-query" },
-    { name: "Quad9", url: "https://dns.quad9.net/dns-query" },
+    { name: "Quad9", url: "https://dns11.quad9.net/dns-query" },
     { name: "AdGuard", url: "https://dns.adguard-dns.com/dns-query" },
     { name: "NextDNS", url: "https://dns.nextdns.io/dns-query" }
 ];
