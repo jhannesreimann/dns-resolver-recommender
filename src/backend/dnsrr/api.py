@@ -29,6 +29,32 @@ class HealthResponse(BaseModel):
     zone: str
 
 
+async def _cleanup_loop(client: CloudflareClient, comment_filter: str) -> None:
+    """Periodically cleans up expired DNS records."""
+    while True:
+        try:
+            records = await client.list_records(comment_contains=comment_filter)
+            now = datetime.now(timezone.utc)
+            for record in records:
+                if not record.created_on:
+                    continue
+                # Cloudflare created_on is format "2014-01-01T05:20:00.12345Z"
+                try:
+                    created_dt = datetime.fromisoformat(record.created_on.replace("Z", "+00:00"))
+                    age_seconds = (now - created_dt).total_seconds()
+                    if age_seconds > 300:  # 5 minutes
+                        logger.info("Cleaning up expired record %s (%s)", record.name, record.record_id)
+                        await client.delete_record(record.record_id)
+                except ValueError:
+                    logger.warning("Failed to parse created_on for record %s: %s", record.record_id, record.created_on)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("Cleanup task failed, retrying in next cycle")
+        
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -37,9 +63,17 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         zone_id=settings.zone_id,
     )
     app.state.cloudflare = client
+    
+    cleanup_task = asyncio.create_task(_cleanup_loop(client, settings.record_comment))
+    
     try:
         yield
     finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
         await client.aclose()
 
 

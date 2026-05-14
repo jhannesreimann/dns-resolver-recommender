@@ -34,6 +34,7 @@ class DnsRecord:
     content: str
     ttl: int
     comment: str | None
+    created_on: str | None
 
 
 class CloudflareClient:
@@ -128,6 +129,7 @@ class CloudflareClient:
             type=str(data["type"]),
             content=str(data["content"]),
             ttl=int(data.get("ttl", 0)),
+            created_on=data.get("created_on"),
             comment=data.get("comment"),
         )
 
