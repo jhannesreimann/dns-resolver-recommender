@@ -56,8 +56,6 @@ pub async fn measure_resolver(
 
     let request = Request::new_with_str_and_init(&url, &opts)?;
     request.headers().set("Accept", "application/dns-message")?;
-    // Add cache bursting to prevent the browser from caching the OPTIONS or GET request
-    request.headers().set("Cache-Control", "no-cache")?;
 
     let window = web_sys::window().ok_or("No window available")?;
     
