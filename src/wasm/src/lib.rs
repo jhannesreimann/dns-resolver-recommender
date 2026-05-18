@@ -44,9 +44,9 @@ pub async fn measure_resolver(
     
     let mut url = doh_url.clone();
     if url.contains('?') {
-        url = format!("{}&dns={}&random={}", url, base64_str, txid);
+        url = format!("{}&dns={}", url, base64_str);
     } else {
-        url = format!("{}?dns={}&random={}", url, base64_str, txid);
+        url = format!("{}?dns={}", url, base64_str);
     }
 
     let mut opts = RequestInit::new();
