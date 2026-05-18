@@ -1,4 +1,4 @@
-import init, { measure_resolver } from './wasm/pkg/dns_resolver_recommender.js';
+import init, { measure_resolver } from './wasm/pkg/dns_resolver_recommender.js?v=1779109982';
 
 const RESOLVERS = [
     { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query" },
@@ -24,7 +24,7 @@ async function runMeasurements() {
     try {
         await init(); // Initialize Wasm
         
-        progress.textContent = "Preparing uncached domains (takes ~20s for DNS propagation)...";
+        progress.textContent = "Preparing uncached domains (takes ~30s for DNS propagation)...";
         const domainInfos = [];
         for (let i = 0; i < RESOLVERS.length; i++) {
             try {
@@ -37,8 +37,8 @@ async function runMeasurements() {
             }
         }
         
-        // Wait 20 seconds for Cloudflare anycast propagation
-        await new Promise(r => setTimeout(r, 20000));
+        // Wait 30 seconds for Cloudflare anycast propagation
+        await new Promise(r => setTimeout(r, 30000));
 
         for (let i = 0; i < RESOLVERS.length; i++) {
             const resolver = RESOLVERS[i];

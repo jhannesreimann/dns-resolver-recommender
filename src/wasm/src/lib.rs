@@ -44,16 +44,15 @@ pub async fn measure_resolver(
     
     let mut url = doh_url.clone();
     if url.contains('?') {
-        url = format!("{}&dns={}", url, base64_str);
+        url = format!("{}&dns={}&random={}", url, base64_str, txid);
     } else {
-        url = format!("{}?dns={}", url, base64_str);
+        url = format!("{}?dns={}&random={}", url, base64_str, txid);
     }
 
     let mut opts = RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(RequestMode::Cors);
     opts.set_credentials(web_sys::RequestCredentials::Omit);
-    opts.set_cache(web_sys::RequestCache::NoStore);
 
     let request = Request::new_with_str_and_init(&url, &opts)?;
     request.headers().set("Accept", "application/dns-message")?;
