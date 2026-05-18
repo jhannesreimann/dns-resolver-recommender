@@ -25,6 +25,7 @@ impl MeasurementResult {
 pub async fn measure_resolver(
     doh_url: String,
     domain: String,
+    allow_cors: bool,
 ) -> Result<MeasurementResult, JsValue> {
     // 1. Build the DNS Query
     let txid: u16 = rand::random();
@@ -49,13 +50,21 @@ pub async fn measure_resolver(
         url = format!("{}?dns={}", url, base64_str);
     }
 
-    let mut opts = RequestInit::new();
+    let opts = RequestInit::new();
     opts.set_method("GET");
-    opts.set_mode(RequestMode::Cors);
+    
+    if allow_cors {
+        opts.set_mode(RequestMode::Cors);
+    } else {
+        opts.set_mode(RequestMode::NoCors);
+    }
+    
     opts.set_credentials(web_sys::RequestCredentials::Omit);
 
     let request = Request::new_with_str_and_init(&url, &opts)?;
-    request.headers().set("Accept", "application/dns-message")?;
+    if allow_cors {
+        request.headers().set("Accept", "application/dns-message")?;
+    }
 
     let window = web_sys::window().ok_or("No window available")?;
     
@@ -65,36 +74,42 @@ pub async fn measure_resolver(
 
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
-
-    if !resp.ok() {
-        return Ok(MeasurementResult {
-            latency_ms: performance.now() - start,
-            status: format!("HTTP Error: {}", resp.status()),
-        });
-    }
-
-    // 4. Parse the Response
-    let buf_value = JsFuture::from(resp.array_buffer()?).await?;
+    
     let end = performance.now();
     let latency = end - start;
 
-    let buf = js_sys::Uint8Array::new(&buf_value);
-    let mut resp_bytes = vec![0; buf.length() as usize];
-    buf.copy_to(&mut resp_bytes);
+    let status: String;
 
-    let parsed_msg = Message::from_vec(&resp_bytes)
-        .map_err(|e| JsValue::from_str(&format!("Failed to parse response: {}", e)))?;
-
-    let response_code = parsed_msg.metadata.response_code;
-    let status = if response_code == hickory_proto::op::ResponseCode::NoError {
-        if parsed_msg.answers.is_empty() {
-            "NOERROR (Empty)".to_string()
-        } else {
-            "ok".to_string()
-        }
+    if !allow_cors {
+        status = "opaque (unverified)".to_string();
     } else {
-        response_code.to_string()
-    };
+        if !resp.ok() {
+            return Ok(MeasurementResult {
+                latency_ms: latency,
+                status: format!("HTTP Error: {}", resp.status()),
+            });
+        }
+
+        // 4. Parse the Response
+        let buf_value = JsFuture::from(resp.array_buffer()?).await?;
+        let buf = js_sys::Uint8Array::new(&buf_value);
+        let mut resp_bytes = vec![0; buf.length() as usize];
+        buf.copy_to(&mut resp_bytes);
+
+        let parsed_msg = Message::from_vec(&resp_bytes)
+            .map_err(|e| JsValue::from_str(&format!("Failed to parse response: {}", e)))?;
+
+        let response_code = parsed_msg.metadata.response_code;
+        status = if response_code == hickory_proto::op::ResponseCode::NoError {
+            if parsed_msg.answers.is_empty() {
+                "NOERROR (Empty)".to_string()
+            } else {
+                "ok".to_string()
+            }
+        } else {
+            response_code.to_string()
+        };
+    }
 
     Ok(MeasurementResult {
         latency_ms: latency,

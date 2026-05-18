@@ -1,12 +1,12 @@
 import init, { measure_resolver } from './wasm/pkg/dns_resolver_recommender.js?v=1779109982';
 
 const RESOLVERS = [
-    { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query" },
-    { name: "Google", url: "https://dns.google/dns-query" },
-    { name: "CleanBrowsing", url: "https://doh.cleanbrowsing.org/doh/family-filter/" }
-    // Note: Quad9, AdGuard, and NextDNS are disabled because their Anycast edges 
-    // lack proper CORS headers (Access-Control-Allow-Origin: *), 
-    // making them unusable for in-browser resolution where response reading is required.
+    { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query", cors: true },
+    { name: "Google", url: "https://dns.google/dns-query", cors: true },
+    { name: "CleanBrowsing", url: "https://doh.cleanbrowsing.org/doh/family-filter/", cors: true },
+    { name: "Quad9", url: "https://dns.quad9.net/dns-query", cors: false },
+    { name: "AdGuard", url: "https://dns.adguard-dns.com/dns-query", cors: false },
+    { name: "NextDNS", url: "https://dns.nextdns.io/dns-query", cors: false }
 ];
 
 const API_BASE = "https://dns.diic-hpi.org/api";
@@ -47,7 +47,7 @@ async function runMeasurements() {
             
             const tr = document.createElement("tr");
             tr.innerHTML = `
-                <td><strong>${resolver.name}</strong></td>
+                <td><strong>${resolver.name}</strong> ${!resolver.cors ? '<span style="color:orange; cursor:help;" title="Missing CORS headers on server. Results are opaque (unverified) and may not reflect actual successful DNS resolution.">⚠️ (No-CORS)</span>' : ''}</td>
                 <td id="cached-${resolver.name}">...</td>
                 <td id="uncached-${resolver.name}">...</td>
                 <td id="status-${resolver.name}" class="status">...</td>
@@ -59,8 +59,8 @@ async function runMeasurements() {
             let cachedStatus = "ok";
             for (let j = 0; j < 3; j++) {
                 try {
-                    const res = await measure_resolver(resolver.url, "example.com");
-                    if (res.status === "ok" || res.status.includes("NOERROR")) {
+                    const res = await measure_resolver(resolver.url, "example.com", resolver.cors);
+                    if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
                         cachedTimes.push(res.latency_ms);
                     } else {
                         cachedStatus = res.status;
@@ -84,11 +84,11 @@ async function runMeasurements() {
             
             if (domainInfo) {
                 try {
-                    const unRes = await measure_resolver(resolver.url, domainInfo.domain);
-                    if (unRes.status === "ok" || unRes.status.includes("NOERROR")) {
+                    const unRes = await measure_resolver(resolver.url, domainInfo.domain, resolver.cors);
+                    if (unRes.status === "ok" || unRes.status.includes("NOERROR") || unRes.status.includes("opaque")) {
                         uncachedMs = unRes.latency_ms;
                         document.getElementById(`uncached-${resolver.name}`).textContent = uncachedMs.toFixed(1);
-                        document.getElementById(`status-${resolver.name}`).textContent = "Success";
+                        document.getElementById(`status-${resolver.name}`).textContent = resolver.cors ? "Success" : "Opaque (Unverified)";
                     } else {
                         document.getElementById(`uncached-${resolver.name}`).textContent = "Fail";
                         document.getElementById(`status-${resolver.name}`).textContent = unRes.status;
