@@ -3,9 +3,10 @@ import init, { measure_resolver } from './wasm/pkg/dns_resolver_recommender.js?v
 const RESOLVERS = [
     { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query" },
     { name: "Google", url: "https://dns.google/dns-query" },
-    { name: "Quad9", url: "https://dns.quad9.net/dns-query" },
-    { name: "AdGuard", url: "https://dns.adguard-dns.com/dns-query" },
-    { name: "NextDNS", url: "https://dns.nextdns.io/dns-query" }
+    { name: "CleanBrowsing", url: "https://doh.cleanbrowsing.org/doh/family-filter/" }
+    // Note: Quad9, AdGuard, and NextDNS are disabled because their Anycast edges 
+    // lack proper CORS headers (Access-Control-Allow-Origin: *), 
+    // making them unusable for in-browser resolution where response reading is required.
 ];
 
 const API_BASE = "https://dns.diic-hpi.org/api";
