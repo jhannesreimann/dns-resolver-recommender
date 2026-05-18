@@ -22,7 +22,7 @@ async function runMeasurements() {
     table.style.display = "table";
     
     try {
-        await init('./wasm/pkg/dns_resolver_recommender_bg.wasm?v=' + Date.now()); // Initialize Wasm with cache-busting
+        await init({ module_or_path: './wasm/pkg/dns_resolver_recommender_bg.wasm?v=' + Date.now() }); // Initialize Wasm with cache-busting
         
         progress.textContent = "Preparing uncached domains (takes ~30s for DNS propagation)...";
         const domainInfos = [];
