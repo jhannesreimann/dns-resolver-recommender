@@ -53,6 +53,7 @@ pub async fn measure_resolver(
     opts.set_method("GET");
     opts.set_mode(RequestMode::Cors);
     opts.set_credentials(web_sys::RequestCredentials::Omit);
+    opts.set_cache(web_sys::RequestCache::NoStore);
 
     let request = Request::new_with_str_and_init(&url, &opts)?;
     request.headers().set("Accept", "application/dns-message")?;

@@ -40,8 +40,7 @@ async function runMeasurements() {
             let cachedTimes = [];
             let cachedStatus = "ok";
             for (let i = 0; i < 3; i++) {
-                // Randomize domain slightly to prevent browser-level DNS caching over multiple visits
-                const res = await measure_resolver(resolver.url, `example-${Date.now()}.com`);
+                const res = await measure_resolver(resolver.url, "example.com");
                 if (res.status === "ok" || res.status.includes("NOERROR")) {
                     cachedTimes.push(res.latency_ms);
                 } else {
