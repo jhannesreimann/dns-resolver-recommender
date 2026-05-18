@@ -24,7 +24,24 @@ async function runMeasurements() {
     try {
         await init(); // Initialize Wasm
         
-        for (const resolver of RESOLVERS) {
+        progress.textContent = "Preparing uncached domains (takes ~20s for DNS propagation)...";
+        const domainInfos = [];
+        for (let i = 0; i < RESOLVERS.length; i++) {
+            try {
+                const rotateRes = await fetch(`${API_BASE}/dns/rotate`, { method: "POST" });
+                if (!rotateRes.ok) throw new Error("Rotate failed");
+                domainInfos.push(await rotateRes.json());
+            } catch (e) {
+                console.error(e);
+                domainInfos.push(null);
+            }
+        }
+        
+        // Wait 20 seconds for Cloudflare anycast propagation
+        await new Promise(r => setTimeout(r, 20000));
+
+        for (let i = 0; i < RESOLVERS.length; i++) {
+            const resolver = RESOLVERS[i];
             progress.textContent = `Measuring ${resolver.name}...`;
             
             const tr = document.createElement("tr");
@@ -39,7 +56,7 @@ async function runMeasurements() {
             // 1. Cached Measurement (Median of 3 queries to example.com)
             let cachedTimes = [];
             let cachedStatus = "ok";
-            for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 3; j++) {
                 const res = await measure_resolver(resolver.url, "example.com");
                 if (res.status === "ok" || res.status.includes("NOERROR")) {
                     cachedTimes.push(res.latency_ms);
@@ -57,31 +74,30 @@ async function runMeasurements() {
 
             // 2. Uncached Measurement (UUID via our backend)
             let uncachedMs = null;
-            let recordId = null;
-            try {
-                const rotateRes = await fetch(`${API_BASE}/dns/rotate`, { method: "POST" });
-                if (!rotateRes.ok) throw new Error("Rotate failed");
-                const { domain, record_id } = await rotateRes.json();
-                recordId = record_id;
-
-                const unRes = await measure_resolver(resolver.url, domain);
-                if (unRes.status === "ok" || unRes.status.includes("NOERROR")) {
-                    uncachedMs = unRes.latency_ms;
-                    document.getElementById(`uncached-${resolver.name}`).textContent = uncachedMs.toFixed(1);
-                    document.getElementById(`status-${resolver.name}`).textContent = "Success";
-                } else {
-                    document.getElementById(`uncached-${resolver.name}`).textContent = "Fail";
-                    document.getElementById(`status-${resolver.name}`).textContent = unRes.status;
+            const domainInfo = domainInfos[i];
+            
+            if (domainInfo) {
+                try {
+                    const unRes = await measure_resolver(resolver.url, domainInfo.domain);
+                    if (unRes.status === "ok" || unRes.status.includes("NOERROR")) {
+                        uncachedMs = unRes.latency_ms;
+                        document.getElementById(`uncached-${resolver.name}`).textContent = uncachedMs.toFixed(1);
+                        document.getElementById(`status-${resolver.name}`).textContent = "Success";
+                    } else {
+                        document.getElementById(`uncached-${resolver.name}`).textContent = "Fail";
+                        document.getElementById(`status-${resolver.name}`).textContent = unRes.status;
+                    }
+                } catch (e) {
+                    console.error(e);
+                    document.getElementById(`uncached-${resolver.name}`).textContent = "Error";
+                    document.getElementById(`status-${resolver.name}`).textContent = "Measurement Error";
+                } finally {
+                    // Cleanup UUID
+                    fetch(`${API_BASE}/dns/${domainInfo.record_id}`, { method: "DELETE" }).catch(console.error);
                 }
-            } catch (e) {
-                console.error(e);
+            } else {
                 document.getElementById(`uncached-${resolver.name}`).textContent = "Error";
                 document.getElementById(`status-${resolver.name}`).textContent = "Backend Error";
-            } finally {
-                // Cleanup UUID
-                if (recordId) {
-                    fetch(`${API_BASE}/dns/${recordId}`, { method: "DELETE" }).catch(console.error);
-                }
             }
             
             // 3. Telemetry (if opted in)
