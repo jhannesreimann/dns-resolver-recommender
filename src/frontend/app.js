@@ -3,7 +3,7 @@ import init, { measure_resolver } from './wasm/pkg/dns_resolver_recommender.js?v
 const RESOLVERS = [
     { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query" },
     { name: "Google", url: "https://dns.google/dns-query" },
-    { name: "Quad9", url: "https://dns11.quad9.net/dns-query" },
+    { name: "Quad9", url: "https://dns.quad9.net/dns-query" },
     { name: "AdGuard", url: "https://dns.adguard-dns.com/dns-query" },
     { name: "NextDNS", url: "https://dns.nextdns.io/dns-query" }
 ];
@@ -57,11 +57,16 @@ async function runMeasurements() {
             let cachedTimes = [];
             let cachedStatus = "ok";
             for (let j = 0; j < 3; j++) {
-                const res = await measure_resolver(resolver.url, "example.com");
-                if (res.status === "ok" || res.status.includes("NOERROR")) {
-                    cachedTimes.push(res.latency_ms);
-                } else {
-                    cachedStatus = res.status;
+                try {
+                    const res = await measure_resolver(resolver.url, "example.com");
+                    if (res.status === "ok" || res.status.includes("NOERROR")) {
+                        cachedTimes.push(res.latency_ms);
+                    } else {
+                        cachedStatus = res.status;
+                    }
+                } catch (e) {
+                    console.error(`Cached measurement failed for ${resolver.name}:`, e);
+                    cachedStatus = "Fetch Error (CORS/Network)";
                 }
             }
             
