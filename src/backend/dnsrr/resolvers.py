@@ -71,8 +71,15 @@ def decode_doh_stamp(stamp_str: str) -> dict[str, Any] | None:
     # 2. Hashes: list of SHA-256 certificate hashes, terminated by a 0-length field
     try:
         while True:
-            h = read_lp()
-            if not h:
+            if idx >= len(data):
+                break
+            vlen = data[idx]
+            length = vlen & 0x7F
+            idx += 1
+            if length > 0:
+                # We skip storing actual hash bytes since we only need to advance idx to reach hostname/path
+                idx += length
+            if not (vlen & 0x80):
                 break
     except Exception:
         pass
@@ -109,6 +116,7 @@ def decode_doh_stamp(stamp_str: str) -> dict[str, Any] | None:
 def parse_resolvers_markdown(content: str) -> list[dict[str, Any]]:
     """Parse the public-resolvers.md file into a list of parsed DoH resolvers."""
     resolvers = []
+    seen_urls = set()
     
     lines = content.splitlines()
     current_name: str | None = None
@@ -126,7 +134,8 @@ def parse_resolvers_markdown(content: str) -> list[dict[str, Any]]:
         # If we have a name and see an sdns link, decode and save
         if current_name and line_stripped.startswith("sdns://"):
             stamp_info = decode_doh_stamp(line_stripped)
-            if stamp_info:
+            if stamp_info and stamp_info["url"] not in seen_urls:
+                seen_urls.add(stamp_info["url"])
                 description = " ".join(current_description_lines).strip()
                 # Clean up multiple whitespaces
                 description = " ".join(description.split())
