@@ -1,13 +1,6 @@
 import init, { measure_resolver } from './wasm/pkg/dns_resolver_recommender.js?v=1779109982';
 
-const RESOLVERS = [
-    { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query", cors: true },
-    { name: "Google", url: "https://dns.google/dns-query", cors: true },
-    { name: "CleanBrowsing", url: "https://doh.cleanbrowsing.org/doh/family-filter/", cors: true },
-    { name: "Quad9", url: "https://dns.quad9.net/dns-query", cors: false },
-    { name: "AdGuard", url: "https://dns.adguard-dns.com/dns-query", cors: false },
-    { name: "NextDNS", url: "https://dns.nextdns.io/dns-query", cors: false }
-];
+let resolvers = [];
 
 const API_BASE = "https://dns.diic-hpi.org/api";
 
@@ -17,7 +10,115 @@ const table = document.getElementById("results-table");
 const tbody = document.getElementById("results-body");
 const optInBox = document.getElementById("opt-in-telemetry");
 
+async function loadResolvers() {
+    try {
+        const response = await fetch(`${API_BASE}/resolvers`);
+        if (!response.ok) throw new Error("Failed to load resolvers list");
+        const list = await response.json();
+        resolvers = list.map(r => ({
+            id: r.id,
+            name: r.name,
+            url: r.url,
+            cors: r.url.includes("cloudflare-dns") || r.url.includes("dns.google") || r.url.includes("cleanbrowsing"),
+            dnssec: r.dnssec,
+            no_logs: r.no_logs,
+            no_filter: r.no_filter,
+            country: r.country,
+            description: r.description
+        }));
+    } catch (e) {
+        console.error(e);
+        resolvers = [
+            { id: "cloudflare", name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query", cors: true, dnssec: true, no_logs: true, no_filter: true, country: "US", description: "Cloudflare public DNS" },
+            { id: "google", name: "Google", url: "https://dns.google/dns-query", cors: true, dnssec: true, no_logs: false, no_filter: true, country: "US", description: "Google public DNS" },
+            { id: "cleanbrowsing", name: "CleanBrowsing", url: "https://doh.cleanbrowsing.org/doh/family-filter/", cors: true, dnssec: true, no_logs: true, no_filter: false, country: "US", description: "CleanBrowsing filtering" },
+            { id: "quad9", name: "Quad9", url: "https://dns.quad9.net/dns-query", cors: false, dnssec: true, no_logs: true, no_filter: false, country: "US", description: "Quad9 filtering" }
+        ];
+    }
+    renderResolverCheckboxes();
+}
+
+function renderResolverCheckboxes() {
+    const container = document.getElementById("resolver-checkboxes");
+    if (!container) return;
+    container.innerHTML = "";
+    
+    const popular = ["cloudflare", "google", "cleanbrowsing", "quad9"];
+    
+    resolvers.forEach(r => {
+        const div = document.createElement("div");
+        div.className = "resolver-item";
+        div.setAttribute("data-name", r.name.toLowerCase());
+        div.setAttribute("data-country", (r.country || "").toLowerCase());
+        
+        const isChecked = popular.includes(r.id) ? "checked" : "";
+        const countryTag = r.country ? `[${r.country}]` : "";
+        const tags = [];
+        if (r.dnssec) tags.push("SEC");
+        if (r.no_logs) tags.push("LOGS_OFF");
+        const tagsStr = tags.length > 0 ? `(${tags.join(",")})` : "";
+        
+        div.innerHTML = `
+            <label style="display: flex; align-items: flex-start; gap: 6px; cursor: pointer; user-select: none;">
+                <input type="checkbox" class="resolver-checkbox" value="${r.id}" ${isChecked} style="margin-top: 3px;">
+                <div>
+                    <strong>${r.name}</strong> <small style="color: gray;">${countryTag} ${tagsStr}</small>
+                </div>
+            </label>
+        `;
+        container.appendChild(div);
+    });
+}
+
+const searchInput = document.getElementById("resolver-search");
+if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
+        const q = e.target.value.toLowerCase();
+        const items = document.querySelectorAll(".resolver-item");
+        items.forEach(item => {
+            const name = item.getAttribute("data-name");
+            const country = item.getAttribute("data-country");
+            if (name.includes(q) || country.includes(q)) {
+                item.style.display = "block";
+            } else {
+                item.style.display = "none";
+            }
+        });
+    });
+}
+
+const selectAllBtn = document.getElementById("select-all-btn");
+if (selectAllBtn) {
+    selectAllBtn.addEventListener("click", () => {
+        document.querySelectorAll(".resolver-checkbox").forEach(cb => {
+            if (cb.parentElement.parentElement.style.display !== "none") {
+                cb.checked = true;
+            }
+        });
+    });
+}
+
+const selectNoneBtn = document.getElementById("select-none-btn");
+if (selectNoneBtn) {
+    selectNoneBtn.addEventListener("click", () => {
+        document.querySelectorAll(".resolver-checkbox").forEach(cb => {
+            cb.checked = false;
+        });
+    });
+}
+
 async function runMeasurements() {
+    const activeResolvers = [];
+    document.querySelectorAll(".resolver-checkbox:checked").forEach(cb => {
+        const r = resolvers.find(res => res.id === cb.value);
+        if (r) activeResolvers.push(r);
+    });
+    
+    if (activeResolvers.length === 0) {
+        progress.textContent = "Please select at least one resolver.";
+        return;
+    }
+
     btn.disabled = true;
     tbody.innerHTML = "";
     table.style.display = "table";
@@ -27,7 +128,7 @@ async function runMeasurements() {
         
         progress.textContent = "Preparing uncached domains (takes ~30s for DNS propagation)...";
         const domainInfos = [];
-        for (let i = 0; i < RESOLVERS.length; i++) {
+        for (let i = 0; i < activeResolvers.length; i++) {
             const resolverDomains = [];
             for (let j = 0; j < 3; j++) {
                 try {
@@ -45,16 +146,23 @@ async function runMeasurements() {
         // Wait 30 seconds for Cloudflare anycast propagation
         await new Promise(r => setTimeout(r, 30000));
 
-        for (let i = 0; i < RESOLVERS.length; i++) {
-            const resolver = RESOLVERS[i];
+        for (let i = 0; i < activeResolvers.length; i++) {
+            const resolver = activeResolvers[i];
             progress.textContent = `Measuring ${resolver.name}...`;
             
             const tr = document.createElement("tr");
+            const metaTags = [];
+            if (resolver.country) metaTags.push(resolver.country);
+            if (resolver.dnssec) metaTags.push("DNSSEC");
+            if (resolver.no_logs) metaTags.push("No-Logs");
+            if (resolver.no_filter) metaTags.push("Unfiltered");
+            const metaTagsStr = metaTags.length > 0 ? `<br><small style="color:gray; font-size:11px;">[${metaTags.join(" | ")}]</small>` : "";
+
             tr.innerHTML = `
-                <td><strong>${resolver.name}</strong> ${!resolver.cors ? '<span style="color:orange; cursor:help;" title="Missing CORS headers on server. Results are opaque (unverified) and may not reflect actual successful DNS resolution.">⚠️ (No-CORS)</span>' : ''}</td>
-                <td id="cached-${resolver.name}">...</td>
-                <td id="uncached-${resolver.name}">...</td>
-                <td id="status-${resolver.name}" class="status">...</td>
+                <td><strong>${resolver.name}</strong> ${!resolver.cors ? '<span style="color:orange; cursor:help;" title="Missing CORS headers on server. Results are opaque (unverified) and may not reflect actual successful DNS resolution.">⚠️ (No-CORS)</span>' : ''}${metaTagsStr}</td>
+                <td id="cached-${resolver.id}">...</td>
+                <td id="uncached-${resolver.id}">...</td>
+                <td id="status-${resolver.id}" class="status">...</td>
             `;
             tbody.appendChild(tr);
 
@@ -79,7 +187,7 @@ async function runMeasurements() {
                 ? cachedTimes.sort((a,b) => a-b)[Math.floor(cachedTimes.length/2)] 
                 : null;
             
-            document.getElementById(`cached-${resolver.name}`).innerHTML = 
+            document.getElementById(`cached-${resolver.id}`).innerHTML = 
                 cachedMs ? `${cachedMs.toFixed(1)} ms<br><small style="color:gray; font-size:11px;">[${cachedTimes.map(t => t.toFixed(1)).join(", ")}]</small>` : "Fail";
 
             // 2. Uncached Measurement (UUID via our backend, median of 3)
@@ -112,11 +220,11 @@ async function runMeasurements() {
                 : null;
 
             if (uncachedMs) {
-                document.getElementById(`uncached-${resolver.name}`).innerHTML = `${uncachedMs.toFixed(1)} ms<br><small style="color:gray; font-size:11px;">[${uncachedTimes.map(t => t.toFixed(1)).join(", ")}]</small>`;
-                document.getElementById(`status-${resolver.name}`).textContent = resolver.cors ? "Success" : "Opaque (Unverified)";
+                document.getElementById(`uncached-${resolver.id}`).innerHTML = `${uncachedMs.toFixed(1)} ms<br><small style="color:gray; font-size:11px;">[${uncachedTimes.map(t => t.toFixed(1)).join(", ")}]</small>`;
+                document.getElementById(`status-${resolver.id}`).textContent = resolver.cors ? "Success" : "Opaque (Unverified)";
             } else {
-                document.getElementById(`uncached-${resolver.name}`).textContent = "Fail";
-                document.getElementById(`status-${resolver.name}`).textContent = uncachedStatus;
+                document.getElementById(`uncached-${resolver.id}`).textContent = "Fail";
+                document.getElementById(`status-${resolver.id}`).textContent = uncachedStatus;
             }
             
             // 3. Telemetry (if opted in)
@@ -135,3 +243,5 @@ async function runMeasurements() {
 }
 
 btn.addEventListener("click", runMeasurements);
+
+loadResolvers();

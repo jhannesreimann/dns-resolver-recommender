@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .cloudflare import CloudflareClient, CloudflareError
 from .config import Settings, get_settings
+from .resolvers import get_resolvers
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,18 @@ class RotateResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     zone: str
+
+
+class ResolverResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    url: str
+    ip_address: str | None = None
+    dnssec: bool
+    no_logs: bool
+    no_filter: bool
+    country: str | None = None
 
 
 async def _cleanup_loop(client: CloudflareClient, comment_filter: str) -> None:
@@ -103,6 +116,17 @@ def create_app() -> FastAPI:
     @app.get("/api/health", response_model=HealthResponse)
     async def health(s: Settings = Depends(get_settings)) -> HealthResponse:
         return HealthResponse(status="ok", zone=s.zone_domain)
+
+    @app.get("/api/resolvers", response_model=list[ResolverResponse])
+    async def list_resolvers(refresh: bool = False) -> list[dict]:
+        try:
+            return await get_resolvers(force_refresh=refresh)
+        except Exception as exc:
+            logger.exception("Failed to load resolvers")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch resolvers: {exc}",
+            ) from exc
 
     @app.post(
         "/api/dns/rotate",
