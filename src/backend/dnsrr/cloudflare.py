@@ -93,6 +93,67 @@ class CloudflareClient:
             return
         self._unwrap(response, action=f"delete record {record_id}")
 
+    async def verify_dns_query(self, query_name: str, since_iso: str) -> dict[str, Any]:
+        """Query the Cloudflare GraphQL API to verify if a domain was queried.
+        
+        Requires the 'Analytics: Read' permission on the API Token.
+        """
+        query = """
+        query ($zoneTag: String!, $queryName: String!, $since: String!) {
+          viewer {
+            zones(filter: { zoneTag: $zoneTag }) {
+              dnsAnalyticsAdaptive(
+                filter: {
+                  datetime_geq: $since
+                  queryName: $queryName
+                }
+                limit: 10
+              ) {
+                queryName
+                responseCode
+                queryType
+                datetime
+              }
+            }
+          }
+        }
+        """
+        payload = {
+            "query": query,
+            "variables": {
+                "zoneTag": self._zone_id,
+                "queryName": query_name,
+                "since": since_iso,
+            }
+        }
+        # Overrides base_url because it is an absolute URL
+        response = await self._client.post("https://api.cloudflare.com/client/v4/graphql", json=payload)
+        
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise CloudflareError(
+                f"Cloudflare GraphQL returned non-JSON (status {response.status_code})"
+            ) from exc
+
+        errors = body.get("errors")
+        if errors:
+            first_error_msg = errors[0].get("message", "")
+            if "does not have permission" in first_error_msg or "authz" in str(errors):
+                return {
+                    "status": "error",
+                    "error_code": "permission_denied",
+                    "message": "Missing 'Analytics: Read' permission on the Cloudflare API token. Please ask the zone administrator to add this permission.",
+                }
+            raise CloudflareError(f"Cloudflare GraphQL error: {errors!r}")
+
+        zones = body.get("data", {}).get("viewer", {}).get("zones", [])
+        if not zones:
+            return {"status": "ok", "queries": []}
+
+        queries = zones[0].get("dnsAnalyticsAdaptive") or []
+        return {"status": "ok", "queries": queries}
+
     async def list_records(
         self,
         comment_contains: str | None = None,

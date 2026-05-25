@@ -148,6 +148,56 @@ def create_app() -> FastAPI:
                 detail=str(exc),
             ) from exc
 
+    class VerifyResponse(BaseModel):
+        status: str
+        verified: bool | None = None
+        query_count: int | None = None
+        error_code: str | None = None
+        message: str | None = None
+        queries: list[dict] | None = None
+
+    @app.get("/api/dns/verify", response_model=VerifyResponse)
+    async def verify(
+        domain: str,
+        since: str | None = None,
+        cf: CloudflareClient = Depends(_client),
+    ) -> VerifyResponse:
+        """Query the Cloudflare GraphQL API to see if the domain was queried.
+        
+        Requires Cloudflare 'Analytics: Read' permission.
+        """
+        # If 'since' is not provided, default to last 10 minutes in ISO UTC format
+        if not since:
+            since = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            # subtract 10 minutes (we can do a timedelta)
+            from datetime import timedelta
+            now_dt = datetime.now(timezone.utc)
+            since_dt = now_dt - timedelta(minutes=10)
+            since = since_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+        try:
+            result = await cf.verify_dns_query(domain, since)
+            if result.get("status") == "error":
+                return VerifyResponse(
+                    status="error",
+                    error_code=result.get("error_code"),
+                    message=result.get("message"),
+                )
+            
+            queries = result.get("queries", [])
+            return VerifyResponse(
+                status="ok",
+                verified=len(queries) > 0,
+                query_count=len(queries),
+                queries=queries,
+            )
+        except CloudflareError as exc:
+            logger.exception("Cloudflare verify failed")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+
     return app
 
 
