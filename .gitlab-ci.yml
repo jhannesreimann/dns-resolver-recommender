@@ -1,0 +1,46 @@
+stages:
+  - deploy
+
+variables:
+  VM_HOST: "46.225.184.21"
+  VM_USER: "jhannesreimann"
+
+# Base configuration for SSH agent setup
+.ssh_setup: &ssh_setup
+  before_script:
+    - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+
+deploy-frontend:
+  stage: deploy
+  <<: *ssh_setup
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - src/frontend/**/*
+        - src/wasm/**/*
+  script:
+    # 1. Pull latest code on the VM
+    - ssh $VM_USER@$VM_HOST "cd ~/dns-resolver-recommender && git pull"
+    # 2. Rebuild WebAssembly on the VM
+    - ssh $VM_USER@$VM_HOST "cd ~/dns-resolver-recommender/src/wasm && wasm-pack build --target web"
+    # 3. Copy frontend and Wasm package to Nginx web root
+    - ssh $VM_USER@$VM_HOST "sudo cp -r ~/dns-resolver-recommender/src/frontend/* /var/www/dnsrr/ && sudo cp -r ~/dns-resolver-recommender/src/wasm/pkg/* /var/www/dnsrr/wasm/pkg/ && sudo chown -R www-data:www-data /var/www/dnsrr"
+
+deploy-backend:
+  stage: deploy
+  <<: *ssh_setup
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - src/backend/**/*
+  script:
+    # 1. Pull latest code on the VM
+    - ssh $VM_USER@$VM_HOST "cd ~/dns-resolver-recommender && git pull"
+    # 2. Copy backend python files to /opt/dnsrr
+    - ssh $VM_USER@$VM_HOST "sudo cp -r ~/dns-resolver-recommender/src/backend/dnsrr/* /opt/dnsrr/src/backend/dnsrr/ && sudo chown -R dnsrr:dnsrr /opt/dnsrr/src/backend && sudo systemctl restart dnsrr"
