@@ -79,8 +79,8 @@ async function runMeasurements() {
                 ? cachedTimes.sort((a,b) => a-b)[Math.floor(cachedTimes.length/2)] 
                 : null;
             
-            document.getElementById(`cached-${resolver.name}`).textContent = 
-                cachedMs ? cachedMs.toFixed(1) : "Fail";
+            document.getElementById(`cached-${resolver.name}`).innerHTML = 
+                cachedMs ? `${cachedMs.toFixed(1)} ms<br><small style="color:gray; font-size:11px;">[${cachedTimes.map(t => t.toFixed(1)).join(", ")}]</small>` : "Fail";
 
             // 2. Uncached Measurement (UUID via our backend, median of 3)
             let uncachedTimes = [];
@@ -112,7 +112,7 @@ async function runMeasurements() {
                 : null;
 
             if (uncachedMs) {
-                document.getElementById(`uncached-${resolver.name}`).textContent = uncachedMs.toFixed(1);
+                document.getElementById(`uncached-${resolver.name}`).innerHTML = `${uncachedMs.toFixed(1)} ms<br><small style="color:gray; font-size:11px;">[${uncachedTimes.map(t => t.toFixed(1)).join(", ")}]</small>`;
                 document.getElementById(`status-${resolver.name}`).textContent = resolver.cors ? "Success" : "Opaque (Unverified)";
             } else {
                 document.getElementById(`uncached-${resolver.name}`).textContent = "Fail";
