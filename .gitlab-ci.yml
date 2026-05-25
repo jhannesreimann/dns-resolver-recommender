@@ -25,12 +25,11 @@ deploy-frontend:
         - src/frontend/**/*
         - src/wasm/**/*
   script:
-    # 1. Pull latest code on the VM
-    - ssh $VM_USER@$VM_HOST "cd ~/dns-resolver-recommender && git pull"
-    # 2. Rebuild WebAssembly on the VM
-    - ssh $VM_USER@$VM_HOST "cd ~/dns-resolver-recommender/src/wasm && wasm-pack build --target web"
-    # 3. Copy frontend and Wasm package to Nginx web root
-    - ssh $VM_USER@$VM_HOST "sudo cp -r ~/dns-resolver-recommender/src/frontend/* /var/www/dnsrr/ && sudo cp -r ~/dns-resolver-recommender/src/wasm/pkg/* /var/www/dnsrr/wasm/pkg/ && sudo chown -R www-data:www-data /var/www/dnsrr"
+    # 1. We don't have rust/wasm-pack easily on the GitLab runner, so we copy the files
+    # to /tmp/ on the VM first, exactly like the manual deploy.
+    - scp -r src/frontend src/wasm/pkg $VM_USER@$VM_HOST:/tmp/
+    # 2. Run the copy commands on the VM using passwordless sudo
+    - ssh $VM_USER@$VM_HOST "sudo cp -r /tmp/frontend/* /var/www/dnsrr/ && sudo cp -r /tmp/pkg/* /var/www/dnsrr/wasm/pkg/ && sudo chown -R www-data:www-data /var/www/dnsrr"
 
 deploy-backend:
   stage: deploy
@@ -40,7 +39,8 @@ deploy-backend:
       changes:
         - src/backend/**/*
   script:
-    # 1. Pull latest code on the VM
-    - ssh $VM_USER@$VM_HOST "cd ~/dns-resolver-recommender && git pull"
-    # 2. Copy backend python files to /opt/dnsrr
-    - ssh $VM_USER@$VM_HOST "sudo cp -r ~/dns-resolver-recommender/src/backend/dnsrr/* /opt/dnsrr/src/backend/dnsrr/ && sudo chown -R dnsrr:dnsrr /opt/dnsrr/src/backend && sudo systemctl restart dnsrr"
+    # 1. Copy backend python files to /tmp/dnsrr/ on the VM
+    - ssh $VM_USER@$VM_HOST "mkdir -p /tmp/dnsrr"
+    - scp -r src/backend/dnsrr/* $VM_USER@$VM_HOST:/tmp/dnsrr/
+    # 2. Copy to the actual FastAPI backend path and restart the daemon via passwordless sudo
+    - ssh $VM_USER@$VM_HOST "sudo cp -r /tmp/dnsrr/* /opt/dnsrr/src/backend/dnsrr/ && sudo chown -R dnsrr:dnsrr /opt/dnsrr/src/backend && sudo systemctl restart dnsrr"
