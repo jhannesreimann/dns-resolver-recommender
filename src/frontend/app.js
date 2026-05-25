@@ -28,14 +28,18 @@ async function runMeasurements() {
         progress.textContent = "Preparing uncached domains (takes ~30s for DNS propagation)...";
         const domainInfos = [];
         for (let i = 0; i < RESOLVERS.length; i++) {
-            try {
-                const rotateRes = await fetch(`${API_BASE}/dns/rotate`, { method: "POST" });
-                if (!rotateRes.ok) throw new Error("Rotate failed");
-                domainInfos.push(await rotateRes.json());
-            } catch (e) {
-                console.error(e);
-                domainInfos.push(null);
+            const resolverDomains = [];
+            for (let j = 0; j < 3; j++) {
+                try {
+                    const rotateRes = await fetch(`${API_BASE}/dns/rotate`, { method: "POST" });
+                    if (!rotateRes.ok) throw new Error("Rotate failed");
+                    resolverDomains.push(await rotateRes.json());
+                } catch (e) {
+                    console.error(e);
+                    resolverDomains.push(null);
+                }
             }
+            domainInfos.push(resolverDomains);
         }
         
         // Wait 30 seconds for Cloudflare anycast propagation
@@ -78,32 +82,41 @@ async function runMeasurements() {
             document.getElementById(`cached-${resolver.name}`).textContent = 
                 cachedMs ? cachedMs.toFixed(1) : "Fail";
 
-            // 2. Uncached Measurement (UUID via our backend)
-            let uncachedMs = null;
-            const domainInfo = domainInfos[i];
+            // 2. Uncached Measurement (UUID via our backend, median of 3)
+            let uncachedTimes = [];
+            let uncachedStatus = "ok";
+            const resolverDomains = domainInfos[i] || [];
             
-            if (domainInfo) {
-                try {
-                    const unRes = await measure_resolver(resolver.url, domainInfo.domain, resolver.cors);
-                    if (unRes.status === "ok" || unRes.status.includes("NOERROR") || unRes.status.includes("opaque")) {
-                        uncachedMs = unRes.latency_ms;
-                        document.getElementById(`uncached-${resolver.name}`).textContent = uncachedMs.toFixed(1);
-                        document.getElementById(`status-${resolver.name}`).textContent = resolver.cors ? "Success" : "Opaque (Unverified)";
-                    } else {
-                        document.getElementById(`uncached-${resolver.name}`).textContent = "Fail";
-                        document.getElementById(`status-${resolver.name}`).textContent = unRes.status;
+            for (let j = 0; j < 3; j++) {
+                const domainInfo = resolverDomains[j];
+                if (domainInfo) {
+                    try {
+                        const unRes = await measure_resolver(resolver.url, domainInfo.domain, resolver.cors);
+                        if (unRes.status === "ok" || unRes.status.includes("NOERROR") || unRes.status.includes("opaque")) {
+                            uncachedTimes.push(unRes.latency_ms);
+                        } else {
+                            uncachedStatus = unRes.status;
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        uncachedStatus = "Measurement Error";
+                    } finally {
+                        // Cleanup UUID
+                        fetch(`${API_BASE}/dns/${domainInfo.record_id}`, { method: "DELETE" }).catch(console.error);
                     }
-                } catch (e) {
-                    console.error(e);
-                    document.getElementById(`uncached-${resolver.name}`).textContent = "Error";
-                    document.getElementById(`status-${resolver.name}`).textContent = "Measurement Error";
-                } finally {
-                    // Cleanup UUID
-                    fetch(`${API_BASE}/dns/${domainInfo.record_id}`, { method: "DELETE" }).catch(console.error);
                 }
+            }
+            
+            const uncachedMs = uncachedTimes.length > 0 
+                ? uncachedTimes.sort((a,b) => a-b)[Math.floor(uncachedTimes.length/2)] 
+                : null;
+
+            if (uncachedMs) {
+                document.getElementById(`uncached-${resolver.name}`).textContent = uncachedMs.toFixed(1);
+                document.getElementById(`status-${resolver.name}`).textContent = resolver.cors ? "Success" : "Opaque (Unverified)";
             } else {
-                document.getElementById(`uncached-${resolver.name}`).textContent = "Error";
-                document.getElementById(`status-${resolver.name}`).textContent = "Backend Error";
+                document.getElementById(`uncached-${resolver.name}`).textContent = "Fail";
+                document.getElementById(`status-${resolver.name}`).textContent = uncachedStatus;
             }
             
             // 3. Telemetry (if opted in)
