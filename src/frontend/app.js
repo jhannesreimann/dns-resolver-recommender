@@ -224,11 +224,16 @@ async function runMeasurements() {
                 ? `<p style="margin:5px 0;"><strong>System DNS IP:</strong> <code>${resolver.ip_address}</code> <button class="copy-btn" id="copy-ip-${resolver.id}" onclick="copyText('${escapedIp}', 'copy-ip-${resolver.id}')">Copy</button></p>`
                 : `<p style="margin:5px 0; color: gray;"><strong>System DNS IP:</strong> Not specified in stamp.</p>`;
 
+            const corsHtml = !resolver.cors
+                ? `<p style="margin:5px 0; color: #d35400;"><strong>CORS Status:</strong> ⚠️ No-CORS (measured via browser opaque mode)</p>`
+                : `<p style="margin:5px 0; color: #27ae60;"><strong>CORS Status:</strong> ✅ Supports CORS (fully verified browser queries)</p>`;
+
             const guideHtml = `
                 <div id="${setupId}" class="setup-details" style="display: none;">
                     <p style="margin:5px 0 10px 0; color: #7f8c8d; font-size:12px;">${resolver.description || 'No additional description provided.'}</p>
                     <p style="margin:5px 0;"><strong>Browser (DoH URL):</strong> <code>${resolver.url}</code> <button class="copy-btn" id="copy-url-${resolver.id}" onclick="copyText('${escapedUrl}', 'copy-url-${resolver.id}')">Copy</button></p>
                     ${ipGuide}
+                    ${corsHtml}
                     <small style="color: #7f8c8d; display:block; margin-top:8px;">Enter the DoH URL in your browser's Secure DNS settings (e.g. Chrome/Firefox Settings -> Secure DNS) or use the IP in your system network settings.</small>
                 </div>
             `;
@@ -237,7 +242,6 @@ async function runMeasurements() {
                 <td>
                     <strong>${resolver.name}</strong> 
                     <button class="setup-guide-btn" onclick="toggleSetup('${setupId}')">⚙️ Setup</button>
-                    ${!resolver.cors ? '<span style="color:orange; cursor:help;" title="Missing CORS headers on server. Results are opaque (unverified) and may not reflect actual successful DNS resolution.">⚠️ (No-CORS)</span>' : ''}
                     ${metaTagsStr}
                     ${guideHtml}
                 </td>
@@ -300,11 +304,16 @@ async function runMeasurements() {
                 ? `<p style="margin:5px 0;"><strong>System DNS IP:</strong> <code>${resolver.ip_address}</code> <button class="copy-btn" id="copy-ip-${resolver.id}" onclick="copyText('${escapedIp}', 'copy-ip-${resolver.id}')">Copy</button></p>`
                 : `<p style="margin:5px 0; color: gray;"><strong>System DNS IP:</strong> Not specified in stamp.</p>`;
 
+            const corsHtml = !resolver.cors
+                ? `<p style="margin:5px 0; color: #d35400;"><strong>CORS Status:</strong> ⚠️ No-CORS (measured via browser opaque mode)</p>`
+                : `<p style="margin:5px 0; color: #27ae60;"><strong>CORS Status:</strong> ✅ Supports CORS (fully verified browser queries)</p>`;
+
             const guideHtml = `
                 <div id="${setupId}" class="setup-details" style="display: none;">
                     <p style="margin:5px 0 10px 0; color: #7f8c8d; font-size:12px;">${resolver.description || 'No additional description provided.'}</p>
                     <p style="margin:5px 0;"><strong>Browser (DoH URL):</strong> <code>${resolver.url}</code> <button class="copy-btn" id="copy-url-${resolver.id}" onclick="copyText('${escapedUrl}', 'copy-url-${resolver.id}')">Copy</button></p>
                     ${ipGuide}
+                    ${corsHtml}
                     <small style="color: #7f8c8d; display:block; margin-top:8px;">Enter the DoH URL in your browser's Secure DNS settings (e.g. Chrome/Firefox Settings -> Secure DNS) or use the IP in your system network settings.</small>
                 </div>
             `;
@@ -313,7 +322,6 @@ async function runMeasurements() {
                 <td>
                     <strong>${resolver.name}</strong>${fastestBadge} 
                     <button class="setup-guide-btn" onclick="toggleSetup('${setupId}')">⚙️ Setup</button>
-                    ${!resolver.cors ? '<span style="color:orange; cursor:help;" title="Missing CORS headers on server. Results are opaque (unverified) and may not reflect actual successful DNS resolution.">⚠️ (No-CORS)</span>' : ''}
                     ${metaTagsStr}
                     ${guideHtml}
                 </td>
