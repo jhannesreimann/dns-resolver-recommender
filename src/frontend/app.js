@@ -61,7 +61,7 @@ async function loadResolvers() {
     }
 }
 
-async function measureOneResolver(resolver, domainInfos) {
+async function measureOneResolver(resolver) {
     const cachedEl = document.getElementById(`cached-${resolver.id}`);
     const uncachedEl = document.getElementById(`uncached-${resolver.id}`);
     const scoreEl = document.getElementById(`score-${resolver.id}`);
@@ -94,14 +94,16 @@ async function measureOneResolver(resolver, domainInfos) {
         }
         resolver.cors = detectedCors;
         
-        // 2. Cached Measurement (Average of 3 queries to example.com)
+        // 2. Cached Measurement (4 queries, discarding the first to eliminate cold-start/TLS bias)
         const cachedTimes = [];
         let cachedStatus = "ok";
-        for (let j = 0; j < 3; j++) {
+        for (let j = 0; j < 4; j++) {
             try {
                 const res = await measure_resolver(resolver.url, "example.com", resolver.cors);
                 if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
-                    cachedTimes.push(res.latency_ms);
+                    if (j > 0) { // Discard the first query
+                        cachedTimes.push(res.latency_ms);
+                    }
                 } else {
                     cachedStatus = res.status;
                 }
@@ -120,23 +122,26 @@ async function measureOneResolver(resolver, domainInfos) {
                 : "Fail";
         }
 
-        // 3. Uncached Measurement (Average of 3 queries to globally generated unique domains)
+        // 3. Uncached Measurement (Average of 3 queries to dynamically generated unique subdomains)
         const uncachedTimes = [];
         let uncachedStatus = "ok";
+        const resolverDomains = [
+            crypto.randomUUID() + ".diic-hpi.org",
+            crypto.randomUUID() + ".diic-hpi.org",
+            crypto.randomUUID() + ".diic-hpi.org"
+        ];
         
         for (let j = 0; j < 3; j++) {
-            const domainInfo = domainInfos[j];
-            if (domainInfo) {
-                try {
-                    const res = await measure_resolver(resolver.url, domainInfo.domain, resolver.cors);
-                    if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
-                        uncachedTimes.push(res.latency_ms);
-                    } else {
-                        uncachedStatus = res.status;
-                    }
-                } catch (e) {
-                    uncachedStatus = "Measurement Error";
+            const domain = resolverDomains[j];
+            try {
+                const res = await measure_resolver(resolver.url, domain, resolver.cors);
+                if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
+                    uncachedTimes.push(res.latency_ms);
+                } else {
+                    uncachedStatus = res.status;
                 }
+            } catch (e) {
+                uncachedStatus = "Measurement Error";
             }
         }
         
@@ -169,7 +174,8 @@ async function measureOneResolver(resolver, domainInfos) {
             uncachedAvg,
             score,
             status: score !== null ? "ok" : "fail",
-            statusText: score !== null ? (resolver.cors ? "Success" : "Opaque (Unverified)") : uncachedStatus
+            statusText: score !== null ? (resolver.cors ? "Success" : "Opaque (Unverified)") : uncachedStatus,
+            domains: resolverDomains
         };
         
     } catch (err) {
@@ -201,26 +207,7 @@ async function runMeasurements() {
     try {
         await init({ module_or_path: './wasm/pkg/dns_resolver_recommender_bg.wasm?v=' + Date.now() }); // Initialize Wasm with cache-busting
         
-        progress.textContent = "Preparing 3 global uncached domains (takes ~30s for DNS propagation)...";
-        const domainInfos = [];
-        for (let j = 0; j < 3; j++) {
-            try {
-                const rotateRes = await fetch(`${API_BASE}/dns/rotate`, { method: "POST" });
-                if (!rotateRes.ok) throw new Error("Rotate failed");
-                domainInfos.push(await rotateRes.json());
-            } catch (e) {
-                console.error(e);
-            }
-        }
-        
-        if (domainInfos.length < 3) {
-            progress.textContent = "Error: Failed to prepare global uncached domains.";
-            btn.disabled = false;
-            return;
-        }
-        
-        // Wait 30 seconds for Cloudflare anycast propagation
-        await new Promise(r => setTimeout(r, 30000));
+        progress.textContent = "Initializing measurements...";
 
         // Render pending rows for all resolvers
         resolvers.forEach(resolver => {
@@ -270,14 +257,14 @@ async function runMeasurements() {
             tbody.appendChild(tr);
         });
 
-        const BATCH_SIZE = 10;
+        const BATCH_SIZE = 15;
         const results = [];
         for (let i = 0; i < resolvers.length; i += BATCH_SIZE) {
             const batch = resolvers.slice(i, i + BATCH_SIZE);
             progress.textContent = `Measuring batch ${Math.floor(i / BATCH_SIZE) + 1} of ${Math.ceil(resolvers.length / BATCH_SIZE)}...`;
             
             await Promise.all(batch.map(async (resolver) => {
-                const res = await measureOneResolver(resolver, domainInfos);
+                const res = await measureOneResolver(resolver);
                 results.push(res);
             }));
         }
@@ -380,37 +367,57 @@ async function runMeasurements() {
             }
         });
 
-        progress.textContent = "Verifying DNS propagation and recursion on Cloudflare...";
-        let verifiedCount = 0;
-        for (let j = 0; j < 3; j++) {
-            const domainInfo = domainInfos[j];
-            if (domainInfo) {
-                try {
-                    const verifyRes = await fetch(`${API_BASE}/dns/verify?domain=${domainInfo.domain}`);
-                    if (verifyRes.ok) {
-                        const data = await verifyRes.json();
-                        if (data.verified) {
-                            verifiedCount++;
-                        }
-                    }
-                } catch (e) {
-                    console.error("Verification failed for", domainInfo.domain, e);
-                }
-            }
-        }
-        
-        if (verifiedCount > 0) {
-            progress.innerHTML = `Measurements complete. <strong>✅ Uncached recursion verified (${verifiedCount}/3 queries registered)</strong> on Cloudflare!`;
-        } else {
-            progress.innerHTML = `Measurements complete. <strong style="color: #d35400;">⚠️ Uncached queries could not be verified</strong> on Cloudflare (may take up to 1-2 min for log propagation).`;
-        }
-
-        // Cleanup the 3 global subdomains in the background
-        domainInfos.forEach(domainInfo => {
-            if (domainInfo) {
-                fetch(`${API_BASE}/dns/${domainInfo.record_id}`, { method: "DELETE" }).catch(console.error);
+        // Collect domains of the fastest 2 successful resolvers for verification
+        const verifList = [];
+        sortedResults.slice(0, 2).forEach(res => {
+            if (res.score !== null && res.domains) {
+                verifList.push(...res.domains);
             }
         });
+
+        if (verifList.length > 0) {
+            progress.innerHTML = `Measurements complete. <span id="verify-status" style="color: #666; font-style: italic;">🔍 Verifying uncached recursion on Cloudflare DNS Analytics (polling)...</span>`;
+            
+            let pollCount = 0;
+            const maxPolls = 15; // Poll every 5 seconds for 75 seconds
+            const pollInterval = setInterval(async () => {
+                pollCount++;
+                let verifiedCount = 0;
+                
+                try {
+                    const checks = await Promise.all(verifList.map(async (domain) => {
+                        try {
+                            const verifyRes = await fetch(`${API_BASE}/dns/verify?domain=${domain}`);
+                            if (verifyRes.ok) {
+                                const data = await verifyRes.json();
+                                return data.verified ? 1 : 0;
+                            }
+                        } catch (e) {
+                            console.error("Verification error for", domain, e);
+                        }
+                        return 0;
+                    }));
+                    verifiedCount = checks.reduce((a, b) => a + b, 0);
+                } catch (e) {
+                    console.error("Verification batch error", e);
+                }
+                
+                const verifyStatusEl = document.getElementById("verify-status");
+                if (verifiedCount > 0) {
+                    clearInterval(pollInterval);
+                    if (verifyStatusEl) {
+                        verifyStatusEl.innerHTML = `<strong>✅ Uncached recursion verified (${verifiedCount} queries registered)</strong> on Cloudflare!`;
+                    }
+                } else if (pollCount >= maxPolls) {
+                    clearInterval(pollInterval);
+                    if (verifyStatusEl) {
+                        verifyStatusEl.innerHTML = `<strong style="color: #d35400;">⚠️ Uncached recursion not yet verified</strong> on Cloudflare (indexing can take 1-2 min).`;
+                    }
+                }
+            }, 5000);
+        } else {
+            progress.textContent = "Measurements complete. See results below.";
+        }
 
     } catch (err) {
         console.error(err);
