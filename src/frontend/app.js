@@ -367,53 +367,69 @@ async function runMeasurements() {
             }
         });
 
-        // Collect domains of the fastest 2 successful resolvers for verification
-        const verifList = [];
-        sortedResults.slice(0, 2).forEach(res => {
-            if (res.score !== null && res.domains) {
-                verifList.push(...res.domains);
-            }
-        });
-
-        if (verifList.length > 0) {
-            progress.innerHTML = `Measurements complete. <span id="verify-status" style="color: #666; font-style: italic;">🔍 Verifying uncached recursion on Cloudflare DNS Analytics (polling)...</span>`;
+        // Collect successful resolvers for verification (limit to top 10 to protect API rate limits)
+        const toVerify = sortedResults.filter(r => r.score !== null).slice(0, 10);
+        
+        if (toVerify.length > 0) {
+            progress.innerHTML = `Measurements complete. <strong>🔍 Verifying top ${toVerify.length} resolvers...</strong>`;
             
+            // Mark initial status of those being verified
+            toVerify.forEach(res => {
+                const statusEl = document.getElementById(`status-${res.resolver.id}`);
+                if (statusEl) {
+                    const typeStr = res.resolver.cors ? "CORS" : "No-CORS";
+                    statusEl.innerHTML = `<span style="color: #d35400;">Verifying... 🔍</span> <br><small style="color: gray; font-size:10px;">(${typeStr})</small>`;
+                }
+            });
+
             let pollCount = 0;
             const maxPolls = 15; // Poll every 5 seconds for 75 seconds
+            const verifiedIds = new Set();
+
             const pollInterval = setInterval(async () => {
                 pollCount++;
-                let verifiedCount = 0;
                 
-                try {
-                    const checks = await Promise.all(verifList.map(async (domain) => {
-                        try {
-                            const verifyRes = await fetch(`${API_BASE}/dns/verify?domain=${domain}`);
-                            if (verifyRes.ok) {
-                                const data = await verifyRes.json();
-                                return data.verified ? 1 : 0;
-                            }
-                        } catch (e) {
-                            console.error("Verification error for", domain, e);
+                // Get the list of remaining unverified resolvers
+                const remaining = toVerify.filter(res => !verifiedIds.has(res.resolver.id));
+                
+                if (remaining.length === 0 || pollCount >= maxPolls) {
+                    clearInterval(pollInterval);
+                    progress.innerHTML = `Measurements complete. <strong>Verification finished!</strong>`;
+                    
+                    // Set timeout status for any that failed to verify
+                    remaining.forEach(res => {
+                        const statusEl = document.getElementById(`status-${res.resolver.id}`);
+                        if (statusEl) {
+                            const typeStr = res.resolver.cors ? "CORS" : "No-CORS";
+                            statusEl.innerHTML = `<span style="color: #c0392b; font-weight: bold;">❌ Unverified</span> <br><small style="color: gray; font-size:10px;">(${typeStr})</small>`;
                         }
-                        return 0;
-                    }));
-                    verifiedCount = checks.reduce((a, b) => a + b, 0);
-                } catch (e) {
-                    console.error("Verification batch error", e);
+                    });
+                    return;
                 }
-                
-                const verifyStatusEl = document.getElementById("verify-status");
-                if (verifiedCount > 0) {
-                    clearInterval(pollInterval);
-                    if (verifyStatusEl) {
-                        verifyStatusEl.innerHTML = `<strong>✅ Uncached recursion verified (${verifiedCount} queries registered)</strong> on Cloudflare!`;
+
+                // Query verify endpoint concurrently for the remaining resolvers
+                await Promise.all(remaining.map(async (res) => {
+                    const firstDomain = res.domains[0]; // Just check the first domain to be fast and lightweight
+                    try {
+                        const verifyRes = await fetch(`${API_BASE}/dns/verify?domain=${firstDomain}`);
+                        if (verifyRes.ok) {
+                            const data = await verifyRes.json();
+                            if (data.verified) {
+                                verifiedIds.add(res.resolver.id);
+                                const statusEl = document.getElementById(`status-${res.resolver.id}`);
+                                if (statusEl) {
+                                    const typeStr = res.resolver.cors ? "CORS" : "No-CORS";
+                                    statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ Verified</span> <br><small style="color: gray; font-size:10px;">(${typeStr})</small>`;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Verification error for", res.resolver.name, e);
                     }
-                } else if (pollCount >= maxPolls) {
-                    clearInterval(pollInterval);
-                    if (verifyStatusEl) {
-                        verifyStatusEl.innerHTML = `<strong style="color: #d35400;">⚠️ Uncached recursion not yet verified</strong> on Cloudflare (indexing can take 1-2 min).`;
-                    }
-                }
+                }));
+
+                // Update progress status text
+                progress.innerHTML = `Measurements complete. <strong>🔍 Verifying... (${verifiedIds.size}/${toVerify.length} verified)</strong>`;
             }, 5000);
         } else {
             progress.textContent = "Measurements complete. See results below.";
