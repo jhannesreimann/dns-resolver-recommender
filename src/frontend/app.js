@@ -70,12 +70,29 @@ async function measureOneResolver(resolver, domainInfos) {
     if (statusEl) statusEl.textContent = "Measuring...";
     
     try {
-        // 1. Connection Warm-up (TLS Establishment)
+        // 1. Connection Warm-up & Dynamic CORS Detection
+        let detectedCors = resolver.cors;
         try {
-            await measure_resolver(resolver.url, "example.com", resolver.cors);
+            // Try CORS query first
+            const warmUpRes = await measure_resolver(resolver.url, "example.com", true);
+            if (warmUpRes.status === "ok" || warmUpRes.status.includes("NOERROR")) {
+                detectedCors = true;
+            } else {
+                // CORS not supported or returned opaque/error, try No-CORS fallback
+                await measure_resolver(resolver.url, "example.com", false);
+                detectedCors = false;
+            }
         } catch (e) {
-            // Proceed even if warm-up fails
+            // CORS failed (e.g. CORS block TypeError), try No-CORS fallback
+            try {
+                await measure_resolver(resolver.url, "example.com", false);
+                detectedCors = false;
+            } catch (e2) {
+                // Both failed, resolver might be down. Leave detectedCors = false
+                detectedCors = false;
+            }
         }
+        resolver.cors = detectedCors;
         
         // 2. Cached Measurement (Average of 3 queries to example.com)
         const cachedTimes = [];
@@ -363,7 +380,30 @@ async function runMeasurements() {
             }
         });
 
-        progress.textContent = "Measurements complete. See results below.";
+        progress.textContent = "Verifying DNS propagation and recursion on Cloudflare...";
+        let verifiedCount = 0;
+        for (let j = 0; j < 3; j++) {
+            const domainInfo = domainInfos[j];
+            if (domainInfo) {
+                try {
+                    const verifyRes = await fetch(`${API_BASE}/dns/verify?domain=${domainInfo.domain}`);
+                    if (verifyRes.ok) {
+                        const data = await verifyRes.json();
+                        if (data.verified) {
+                            verifiedCount++;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Verification failed for", domainInfo.domain, e);
+                }
+            }
+        }
+        
+        if (verifiedCount > 0) {
+            progress.innerHTML = `Measurements complete. <strong>✅ Uncached recursion verified (${verifiedCount}/3 queries registered)</strong> on Cloudflare!`;
+        } else {
+            progress.innerHTML = `Measurements complete. <strong style="color: #d35400;">⚠️ Uncached queries could not be verified</strong> on Cloudflare (may take up to 1-2 min for log propagation).`;
+        }
 
         // Cleanup the 3 global subdomains in the background
         domainInfos.forEach(domainInfo => {
