@@ -129,14 +129,17 @@ async function measureOneResolver(resolver) {
             };
         }
 
-        // 2. Cached Measurement (4 queries, discarding the first to eliminate cold-start/TLS bias)
+        // 2. Cached Measurement (5 queries, discarding the first 2 to eliminate cold-start/TLS bias).
+        // Empirical testing showed that discarding only 1 query is insufficient: TCP slow-start,
+        // TLS session ticket exchange, and HTTP/2 stream initialization take 2-3 round-trips
+        // to fully stabilize. Query 2 (our old first "valid" one) was often 2x the settled latency.
         const cachedTimes = [];
         let cachedStatus = "ok";
-        for (let j = 0; j < 4; j++) {
+        for (let j = 0; j < 5; j++) {
             try {
                 const res = await measure_resolver(resolver.url, "example.com", resolver.cors, MEASUREMENT_TIMEOUT_MS);
                 if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
-                    if (j > 0) { // Discard the first query
+                    if (j > 1) { // Discard the first 2 queries (j=0 and j=1)
                         cachedTimes.push(res.latency_ms);
                     }
                 } else if (res.status === "Timeout") {
