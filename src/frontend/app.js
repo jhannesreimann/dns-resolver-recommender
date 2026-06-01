@@ -135,11 +135,13 @@ async function measureOneResolver(resolver) {
         // to fully stabilize. Using 5 kept queries means a single outlier moves the mean by ~20%
         // instead of the ~50% distortion caused by a spike in 3 kept queries.
         const cachedTimes = [];
+        const allCachedRaw = []; // ALL 7 including warmup, for research analysis
         let cachedStatus = "ok";
         for (let j = 0; j < 7; j++) {
             try {
                 const res = await measure_resolver(resolver.url, "example.com", resolver.cors, MEASUREMENT_TIMEOUT_MS);
                 if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
+                    allCachedRaw.push(res.latency_ms); // keep all 7
                     if (j > 1) { // Discard the first 2 queries (j=0 and j=1)
                         cachedTimes.push(res.latency_ms);
                     }
@@ -152,6 +154,10 @@ async function measureOneResolver(resolver) {
                 cachedStatus = "Fetch Error (CORS/Network)";
             }
         }
+        // Log full warmup profile for research analysis
+        if (allCachedRaw.length > 0) {
+            console.log(`WARMUP [${resolver.name}]: [${allCachedRaw.map(v => v.toFixed(1)).join(', ')}]`);
+        }
 
         const cachedAvg = cachedTimes.length > 0
             ? cachedTimes.reduce((a, b) => a + b, 0) / cachedTimes.length
@@ -163,23 +169,24 @@ async function measureOneResolver(resolver) {
                 : "Fail";
         }
 
-        // 3. Uncached Measurement (Average of 3 queries to dynamically generated unique subdomains)
+        // 3. Uncached Measurement (5 queries to unique UUID subdomains, same sample size as cached)
         const uncachedTimes = [];
         let uncachedStatus = "ok";
         const resolverDomains = [
             crypto.randomUUID() + ".diic-hpi.org",
             crypto.randomUUID() + ".diic-hpi.org",
+            crypto.randomUUID() + ".diic-hpi.org",
+            crypto.randomUUID() + ".diic-hpi.org",
             crypto.randomUUID() + ".diic-hpi.org"
         ];
-        
-        for (let j = 0; j < 3; j++) {
+
+        for (let j = 0; j < 5; j++) {
             const domain = resolverDomains[j];
             try {
                 const res = await measure_resolver(resolver.url, domain, resolver.cors, MEASUREMENT_TIMEOUT_MS);
                 if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
                     uncachedTimes.push(res.latency_ms);
                 } else if (res.status === "Timeout") {
-                    // Individual uncached query timed out
                     if (statusEl) statusEl.textContent = "Partial Timeout";
                 } else {
                     uncachedStatus = res.status;
