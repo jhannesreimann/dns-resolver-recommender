@@ -129,13 +129,14 @@ async function measureOneResolver(resolver) {
             };
         }
 
-        // 2. Cached Measurement (5 queries, discarding the first 2 to eliminate cold-start/TLS bias).
+        // 2. Cached Measurement (7 queries, discarding the first 2 to eliminate cold-start/TLS bias).
         // Empirical testing showed that discarding only 1 query is insufficient: TCP slow-start,
         // TLS session ticket exchange, and HTTP/2 stream initialization take 2-3 round-trips
-        // to fully stabilize. Query 2 (our old first "valid" one) was often 2x the settled latency.
+        // to fully stabilize. Using 5 kept queries means a single outlier moves the mean by ~20%
+        // instead of the ~50% distortion caused by a spike in 3 kept queries.
         const cachedTimes = [];
         let cachedStatus = "ok";
-        for (let j = 0; j < 5; j++) {
+        for (let j = 0; j < 7; j++) {
             try {
                 const res = await measure_resolver(resolver.url, "example.com", resolver.cors, MEASUREMENT_TIMEOUT_MS);
                 if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
@@ -143,7 +144,6 @@ async function measureOneResolver(resolver) {
                         cachedTimes.push(res.latency_ms);
                     }
                 } else if (res.status === "Timeout") {
-                    // Individual query timed out, skip it
                     if (statusEl) statusEl.textContent = "Partial Timeout";
                 } else {
                     cachedStatus = res.status;
@@ -152,11 +152,11 @@ async function measureOneResolver(resolver) {
                 cachedStatus = "Fetch Error (CORS/Network)";
             }
         }
-        
-        const cachedAvg = cachedTimes.length > 0 
-            ? cachedTimes.reduce((a, b) => a + b, 0) / cachedTimes.length 
+
+        const cachedAvg = cachedTimes.length > 0
+            ? cachedTimes.reduce((a, b) => a + b, 0) / cachedTimes.length
             : null;
-            
+
         if (cachedEl) {
             cachedEl.innerHTML = cachedAvg !== null
                 ? `${cachedAvg.toFixed(1)} ms<br><small style="color:gray; font-size:11px;">[${cachedTimes.map(t => t.toFixed(1)).join(", ")}]</small>`
@@ -189,8 +189,8 @@ async function measureOneResolver(resolver) {
             }
         }
         
-        const uncachedAvg = uncachedTimes.length > 0 
-            ? uncachedTimes.reduce((a, b) => a + b, 0) / uncachedTimes.length 
+        const uncachedAvg = uncachedTimes.length > 0
+            ? uncachedTimes.reduce((a, b) => a + b, 0) / uncachedTimes.length
             : null;
 
         if (uncachedAvg) {
@@ -202,7 +202,7 @@ async function measureOneResolver(resolver) {
             if (uncachedEl) uncachedEl.textContent = "Fail";
             if (statusEl) statusEl.textContent = uncachedStatus;
         }
-        
+
         // Calculate Weighted Performance Score (80% Cached + 20% Uncached)
         const score = (cachedAvg !== null && uncachedAvg !== null)
             ? (0.8 * cachedAvg + 0.2 * uncachedAvg)
