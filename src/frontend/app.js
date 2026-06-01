@@ -420,26 +420,28 @@ async function runMeasurements() {
             }
         });
 
-        // Verification: separate CORS and no-CORS resolvers.
-        // CORS resolvers that returned valid DNS responses are inherently trusted
-        // because we parsed their answer records. Only no-CORS (opaque) resolvers
-        // need Cloudflare GraphQL verification to detect cheating.
-        const top10 = sortedResults.filter(r => r.score !== null).slice(0, 10);
-        const corsResolvers = top10.filter(r => r.resolver.cors && r.statusText === "Success");
-        const opaqueResolvers = top10.filter(r => !r.resolver.cors || r.statusText !== "Success");
+        // Verification: two-tier trust architecture.
+        // Tier 1: ALL CORS resolvers with valid DNS responses are inherently trusted
+        // because we parsed their A record answers. They get "Verified (DNS)" immediately.
+        // Tier 2: For no-CORS (opaque) resolvers, we poll Cloudflare GraphQL to detect
+        // cheating. We limit GraphQL polling to top 10 opaque resolvers to protect API rate limits.
+        const allValid = sortedResults.filter(r => r.score !== null);
+        const allCors = allValid.filter(r => r.resolver.cors && r.statusText === "Success");
+        const opaqueForVerification = allValid.filter(r => !r.resolver.cors || r.statusText !== "Success").slice(0, 10);
 
-        // Auto-verify CORS resolvers immediately
-        corsResolvers.forEach(res => {
+        // Auto-verify ALL CORS resolvers immediately (regardless of rank)
+        allCors.forEach(res => {
             const statusEl = document.getElementById(`status-${res.resolver.id}`);
             if (statusEl) {
                 statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ Verified (DNS)</span> <br><small style="color: gray; font-size:10px;">(CORS response parsed)</small>`;
             }
         });
 
-        if (opaqueResolvers.length > 0) {
-            progress.innerHTML = `Measurements complete. CORS: ${corsResolvers.length} auto-verified. <strong>🔍 Verifying ${opaqueResolvers.length} opaque resolvers...</strong>`;
+        if (opaqueForVerification.length > 0) {
+            const corsCount = allCors.length;
+            progress.innerHTML = `Measurements complete. CORS: ${corsCount} auto-verified. <strong>🔍 Verifying top ${opaqueForVerification.length} opaque resolvers...</strong>`;
 
-            opaqueResolvers.forEach(res => {
+            opaqueForVerification.forEach(res => {
                 const statusEl = document.getElementById(`status-${res.resolver.id}`);
                 if (statusEl) {
                     statusEl.innerHTML = `<span style="color: #d35400;">Verifying... 🔍</span> <br><small style="color: gray; font-size:10px;">(No-CORS)</small>`;
@@ -457,7 +459,7 @@ async function runMeasurements() {
             await new Promise(r => setTimeout(r, INITIAL_DELAY_MS));
 
             while (true) {
-                const remaining = opaqueResolvers.filter(res => !verifiedIds.has(res.resolver.id));
+                const remaining = opaqueForVerification.filter(res => !verifiedIds.has(res.resolver.id));
                 if (remaining.length === 0) break;
                 if (Date.now() - startTs >= MAX_TOTAL_MS) break;
 
@@ -481,10 +483,10 @@ async function runMeasurements() {
                     }
                 }));
 
-                const totalVerified = corsResolvers.length + verifiedIds.size;
-                progress.innerHTML = `Measurements complete. CORS: ${corsResolvers.length} verified. <strong>Opaque: ${verifiedIds.size}/${opaqueResolvers.length} verified</strong>`;
+                const opaqueVerified = verifiedIds.size;
+                progress.innerHTML = `Measurements complete. CORS: ${allCors.length} verified. <strong>Opaque: ${opaqueVerified}/${opaqueForVerification.length} verified</strong>`;
 
-                const stillRemaining = opaqueResolvers.filter(res => !verifiedIds.has(res.resolver.id));
+                const stillRemaining = opaqueForVerification.filter(res => !verifiedIds.has(res.resolver.id));
                 if (stillRemaining.length === 0) break;
 
                 const delay = (BACKOFF_SECS[Math.min(pollIdx, BACKOFF_SECS.length - 1)] || 32) * 1000;
@@ -496,14 +498,14 @@ async function runMeasurements() {
             progress.innerHTML = `Measurements complete. <strong>Verification finished!</strong>`;
 
             // Mark opaque resolvers that failed verification
-            opaqueResolvers.filter(res => !verifiedIds.has(res.resolver.id)).forEach(res => {
+            opaqueForVerification.filter(res => !verifiedIds.has(res.resolver.id)).forEach(res => {
                 const statusEl = document.getElementById(`status-${res.resolver.id}`);
                 if (statusEl) {
                     statusEl.innerHTML = `<span style="color: #c0392b; font-weight: bold;">❌ Unverified</span> <br><small style="color: gray; font-size:10px;">(No-CORS, not in authoritative logs)</small>`;
                 }
             });
         } else {
-            progress.innerHTML = `Measurements complete. <strong>All ${corsResolvers.length} top resolvers auto-verified via CORS.</strong>`;
+            progress.innerHTML = `Measurements complete. <strong>All resolvers auto-verified via CORS.</strong>`;
         }
 
     } catch (err) {
