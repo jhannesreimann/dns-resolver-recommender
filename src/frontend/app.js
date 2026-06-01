@@ -154,10 +154,8 @@ async function measureOneResolver(resolver) {
                 cachedStatus = "Fetch Error (CORS/Network)";
             }
         }
-        // Log full warmup profile for research analysis
-        if (allCachedRaw.length > 0) {
-            console.log(`WARMUP [${resolver.name}]: [${allCachedRaw.map(v => v.toFixed(1)).join(', ')}]`);
-        }
+        // allCachedRaw stores the full 7-query profile (including discarded j=0,1)
+        // for potential future analysis. Not displayed in the UI.
 
         const cachedAvg = cachedTimes.length > 0
             ? cachedTimes.reduce((a, b) => a + b, 0) / cachedTimes.length
