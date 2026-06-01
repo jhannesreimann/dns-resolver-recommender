@@ -3,6 +3,7 @@ import init, { measure_resolver } from './wasm/pkg/dns_resolver_recommender.js?v
 let resolvers = [];
 
 const API_BASE = "https://dns.diic-hpi.org/api";
+const MEASUREMENT_TIMEOUT_MS = 3000; // 3-second hard timeout per DoH query
 
 const btn = document.getElementById("start-btn");
 const progress = document.getElementById("progress");
@@ -72,38 +73,73 @@ async function measureOneResolver(resolver) {
     try {
         // 1. Connection Warm-up & Dynamic CORS Detection
         let detectedCors = resolver.cors;
+        let warmupFailed = false;
         try {
             // Try CORS query first
-            const warmUpRes = await measure_resolver(resolver.url, "example.com", true);
+            const warmUpRes = await measure_resolver(resolver.url, "example.com", true, MEASUREMENT_TIMEOUT_MS);
             if (warmUpRes.status === "ok" || warmUpRes.status.includes("NOERROR")) {
                 detectedCors = true;
+            } else if (warmUpRes.status === "Timeout") {
+                // Resolver timed out on CORS - try no-CORS before giving up
+                try {
+                    const fallbackRes = await measure_resolver(resolver.url, "example.com", false, MEASUREMENT_TIMEOUT_MS);
+                    if (fallbackRes.status === "Timeout") {
+                        warmupFailed = true;
+                    }
+                    detectedCors = false;
+                } catch (e2) {
+                    warmupFailed = true;
+                }
             } else {
                 // CORS not supported or returned opaque/error, try No-CORS fallback
-                await measure_resolver(resolver.url, "example.com", false);
+                await measure_resolver(resolver.url, "example.com", false, MEASUREMENT_TIMEOUT_MS);
                 detectedCors = false;
             }
         } catch (e) {
             // CORS failed (e.g. CORS block TypeError), try No-CORS fallback
             try {
-                await measure_resolver(resolver.url, "example.com", false);
+                const fallbackRes = await measure_resolver(resolver.url, "example.com", false, MEASUREMENT_TIMEOUT_MS);
+                if (fallbackRes.status === "Timeout") {
+                    warmupFailed = true;
+                }
                 detectedCors = false;
             } catch (e2) {
-                // Both failed, resolver might be down. Leave detectedCors = false
+                // Both failed, resolver is dead
+                warmupFailed = true;
                 detectedCors = false;
             }
         }
         resolver.cors = detectedCors;
-        
+
+        // Fast-path: if warmup failed entirely, skip this resolver
+        if (warmupFailed) {
+            if (cachedEl) cachedEl.textContent = "Dead";
+            if (uncachedEl) uncachedEl.textContent = "Dead";
+            if (scoreEl) scoreEl.textContent = "Dead";
+            if (statusEl) statusEl.textContent = "Timeout / Offline";
+            return {
+                resolver,
+                cachedAvg: null,
+                uncachedAvg: null,
+                score: null,
+                status: "dead",
+                statusText: "Timeout / Offline"
+            };
+        }
+
         // 2. Cached Measurement (4 queries, discarding the first to eliminate cold-start/TLS bias)
         const cachedTimes = [];
         let cachedStatus = "ok";
         for (let j = 0; j < 4; j++) {
             try {
-                const res = await measure_resolver(resolver.url, "example.com", resolver.cors);
+                const res = await measure_resolver(resolver.url, "example.com", resolver.cors, MEASUREMENT_TIMEOUT_MS);
                 if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
                     if (j > 0) { // Discard the first query
                         cachedTimes.push(res.latency_ms);
                     }
+                } else if (res.status === "Timeout") {
+                    // Individual query timed out, skip it
+                    if (statusEl) statusEl.textContent = "Partial Timeout";
                 } else {
                     cachedStatus = res.status;
                 }
@@ -134,9 +170,12 @@ async function measureOneResolver(resolver) {
         for (let j = 0; j < 3; j++) {
             const domain = resolverDomains[j];
             try {
-                const res = await measure_resolver(resolver.url, domain, resolver.cors);
+                const res = await measure_resolver(resolver.url, domain, resolver.cors, MEASUREMENT_TIMEOUT_MS);
                 if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
                     uncachedTimes.push(res.latency_ms);
+                } else if (res.status === "Timeout") {
+                    // Individual uncached query timed out
+                    if (statusEl) statusEl.textContent = "Partial Timeout";
                 } else {
                     uncachedStatus = res.status;
                 }
@@ -382,34 +421,29 @@ async function runMeasurements() {
                 }
             });
 
-            let pollCount = 0;
-            const maxPolls = 15; // Poll every 5 seconds for 75 seconds
+            // Verification polling with exponential backoff.
+            // Cloudflare GraphQL DNS Analytics has an ingestion lag of 5-60+ seconds,
+            // so we delay the first poll and use sparse backoff to avoid hammering the API
+            // while logs are still indexing.
+            const INITIAL_DELAY_MS = 10000;  // first poll delayed 10s
+            const MAX_TOTAL_MS = 90000;       // 90s total budget
+            const BACKOFF_SECS = [0, 8, 16, 32]; // intervals between successive polls
             const verifiedIds = new Set();
+            let pollIdx = 0;
+            const startTs = Date.now();
 
-            const pollInterval = setInterval(async () => {
-                pollCount++;
-                
-                // Get the list of remaining unverified resolvers
+            // Initial delay before first poll
+            await new Promise(r => setTimeout(r, INITIAL_DELAY_MS));
+
+            while (true) {
                 const remaining = toVerify.filter(res => !verifiedIds.has(res.resolver.id));
-                
-                if (remaining.length === 0 || pollCount >= maxPolls) {
-                    clearInterval(pollInterval);
-                    progress.innerHTML = `Measurements complete. <strong>Verification finished!</strong>`;
-                    
-                    // Set timeout status for any that failed to verify
-                    remaining.forEach(res => {
-                        const statusEl = document.getElementById(`status-${res.resolver.id}`);
-                        if (statusEl) {
-                            const typeStr = res.resolver.cors ? "CORS" : "No-CORS";
-                            statusEl.innerHTML = `<span style="color: #c0392b; font-weight: bold;">❌ Unverified</span> <br><small style="color: gray; font-size:10px;">(${typeStr})</small>`;
-                        }
-                    });
-                    return;
-                }
+                if (remaining.length === 0) break;
+                if (Date.now() - startTs >= MAX_TOTAL_MS) break;
 
                 // Query verify endpoint concurrently for the remaining resolvers
                 await Promise.all(remaining.map(async (res) => {
-                    const firstDomain = res.domains[0]; // Just check the first domain to be fast and lightweight
+                    if (!res.domains || !res.domains[0]) return;
+                    const firstDomain = res.domains[0];
                     try {
                         const verifyRes = await fetch(`${API_BASE}/dns/verify?domain=${firstDomain}`);
                         if (verifyRes.ok) {
@@ -428,9 +462,29 @@ async function runMeasurements() {
                     }
                 }));
 
-                // Update progress status text
-                progress.innerHTML = `Measurements complete. <strong>🔍 Verifying... (${verifiedIds.size}/${toVerify.length} verified)</strong>`;
-            }, 5000);
+                progress.innerHTML = `Measurements complete. <strong>Verifying... (${verifiedIds.size}/${toVerify.length} verified)</strong>`;
+
+                // Check again after the concurrent fetch -- exit early if all done
+                const stillRemaining = toVerify.filter(res => !verifiedIds.has(res.resolver.id));
+                if (stillRemaining.length === 0) break;
+
+                // Exponential backoff between polls
+                const delay = (BACKOFF_SECS[Math.min(pollIdx, BACKOFF_SECS.length - 1)] || 32) * 1000;
+                pollIdx++;
+                if (Date.now() - startTs + delay >= MAX_TOTAL_MS) break;
+                await new Promise(r => setTimeout(r, delay));
+            }
+
+            progress.innerHTML = `Measurements complete. <strong>Verification finished!</strong>`;
+
+            // Mark any still-unverified resolvers
+            toVerify.filter(res => !verifiedIds.has(res.resolver.id)).forEach(res => {
+                const statusEl = document.getElementById(`status-${res.resolver.id}`);
+                if (statusEl) {
+                    const typeStr = res.resolver.cors ? "CORS" : "No-CORS";
+                    statusEl.innerHTML = `<span style="color: #c0392b; font-weight: bold;">❌ Unverified</span> <br><small style="color: gray; font-size:10px;">(${typeStr})</small>`;
+                }
+            });
         } else {
             progress.textContent = "Measurements complete. See results below.";
         }

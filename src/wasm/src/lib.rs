@@ -3,7 +3,7 @@ use hickory_proto::rr::{Name, RecordType};
 use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Request, RequestInit, RequestMode, Response};
+use web_sys::{AbortSignal, Request, RequestInit, RequestMode, Response};
 
 #[wasm_bindgen]
 pub struct MeasurementResult {
@@ -19,13 +19,15 @@ impl MeasurementResult {
     }
 }
 
-/// Measures a single DoH request.
+/// Measures a single DoH request with a configurable timeout.
 /// Returns latency in ms and "ok" if NOERROR and an A record was returned.
+/// On timeout, returns status "Timeout" with 0 latency.
 #[wasm_bindgen]
 pub async fn measure_resolver(
     doh_url: String,
     domain: String,
     allow_cors: bool,
+    timeout_ms: u32,
 ) -> Result<MeasurementResult, JsValue> {
     // 1. Build the DNS Query
     let txid: u16 = rand::random();
@@ -52,14 +54,18 @@ pub async fn measure_resolver(
 
     let opts = RequestInit::new();
     opts.set_method("GET");
-    
+
     if allow_cors {
         opts.set_mode(RequestMode::Cors);
     } else {
         opts.set_mode(RequestMode::NoCors);
     }
-    
+
     opts.set_credentials(web_sys::RequestCredentials::Omit);
+
+    // Set a strict timeout to avoid hanging on dead/offline resolvers
+    let signal = AbortSignal::timeout_with_u32(timeout_ms);
+    opts.set_signal(Some(&signal));
 
     let request = Request::new_with_str_and_init(&url, &opts)?;
     if allow_cors {
@@ -67,14 +73,38 @@ pub async fn measure_resolver(
     }
 
     let window = web_sys::window().ok_or("No window available")?;
-    
+
     // 3. Measure Roundtrip
     let performance = window.performance().ok_or("No performance API available")?;
     let start = performance.now();
 
-    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp_value = match JsFuture::from(window.fetch_with_request(&request)).await {
+        Ok(val) => val,
+        Err(e) => {
+            // DOMException with name "AbortError" means the fetch was aborted (timeout)
+            let is_abort = js_sys::Reflect::get(&e, &JsValue::from_str("name"))
+                .ok()
+                .and_then(|n| n.as_string())
+                .map(|name| name == "AbortError")
+                .unwrap_or(false);
+            if is_abort {
+                return Ok(MeasurementResult {
+                    latency_ms: timeout_ms as f64,
+                    status: "Timeout".to_string(),
+                });
+            }
+            // Catch plain string "AbortError" as well (defensive)
+            if e.as_string().map(|s| s.contains("AbortError")).unwrap_or(false) {
+                return Ok(MeasurementResult {
+                    latency_ms: timeout_ms as f64,
+                    status: "Timeout".to_string(),
+                });
+            }
+            return Err(e);
+        }
+    };
     let resp: Response = resp_value.dyn_into()?;
-    
+
     let end = performance.now();
     let latency = end - start;
 

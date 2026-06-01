@@ -10,10 +10,11 @@ export class MeasurementResult {
 }
 
 /**
- * Measures a single DoH request.
+ * Measures a single DoH request with a configurable timeout.
  * Returns latency in ms and "ok" if NOERROR and an A record was returned.
+ * On timeout, returns status "Timeout" with 0 latency.
  */
-export function measure_resolver(doh_url: string, domain: string, allow_cors: boolean): Promise<MeasurementResult>;
+export function measure_resolver(doh_url: string, domain: string, allow_cors: boolean, timeout_ms: number): Promise<MeasurementResult>;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -22,16 +23,16 @@ export interface InitOutput {
     readonly __wbg_get_measurementresult_latency_ms: (a: number) => number;
     readonly __wbg_measurementresult_free: (a: number, b: number) => void;
     readonly __wbg_set_measurementresult_latency_ms: (a: number, b: number) => void;
-    readonly measure_resolver: (a: number, b: number, c: number, d: number, e: number) => any;
+    readonly measure_resolver: (a: number, b: number, c: number, d: number, e: number, f: number) => any;
     readonly measurementresult_status: (a: number) => [number, number];
-    readonly wasm_bindgen__convert__closures_____invoke__hf663def7d229da9f: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen__convert__closures_____invoke__h3d562d17d9b54d91: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__hee085993e1047631: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen__convert__closures_____invoke__h54de09293abacf2d: (a: number, b: number, c: any, d: any) => void;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
-    readonly __wbindgen_malloc: (a: number, b: number) => number;
-    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;
