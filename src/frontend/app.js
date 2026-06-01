@@ -44,7 +44,7 @@ async function loadResolvers() {
             name: r.name,
             url: r.url,
             ip_address: r.ip_address,
-            cors: r.url.includes("cloudflare-dns") || r.url.includes("dns.google"),
+            cors: r.url.includes("cloudflare-dns") || r.url.includes("dns.cloudflare") || r.url.includes("dns.google") || r.url.includes("8.8.8.8"),
             dnssec: r.dnssec,
             no_logs: r.no_logs,
             no_filter: r.no_filter,
@@ -123,7 +123,9 @@ async function measureOneResolver(resolver) {
                 uncachedAvg: null,
                 score: null,
                 status: "dead",
-                statusText: "Timeout / Offline"
+                statusText: "Timeout / Offline",
+                cachedTimes: [],
+                uncachedTimes: []
             };
         }
 
@@ -214,9 +216,11 @@ async function measureOneResolver(resolver) {
             score,
             status: score !== null ? "ok" : "fail",
             statusText: score !== null ? (resolver.cors ? "Success" : "Opaque (Unverified)") : uncachedStatus,
-            domains: resolverDomains
+            domains: resolverDomains,
+            cachedTimes,
+            uncachedTimes
         };
-        
+
     } catch (err) {
         if (cachedEl) cachedEl.textContent = "Fail";
         if (uncachedEl) uncachedEl.textContent = "Fail";
@@ -228,7 +232,9 @@ async function measureOneResolver(resolver) {
             uncachedAvg: null,
             score: null,
             status: "fail",
-            statusText: "Error"
+            statusText: "Error",
+            cachedTimes: [],
+            uncachedTimes: []
         };
     }
 }
@@ -379,15 +385,21 @@ async function runMeasurements() {
             const uncachedEl = document.getElementById(`uncached-${resolver.id}`);
             const scoreEl = document.getElementById(`score-${resolver.id}`);
             const statusEl = document.getElementById(`status-${resolver.id}`);
-            
+
+            // Build per-query detail string for setup panel
+            const cachedDetail = res.cachedTimes && res.cachedTimes.length > 0
+                ? res.cachedTimes.map(t => t.toFixed(1)).join(", ") : "N/A";
+            const uncachedDetail = res.uncachedTimes && res.uncachedTimes.length > 0
+                ? res.uncachedTimes.map(t => t.toFixed(1)).join(", ") : "N/A";
+
             if (cachedEl) {
                 cachedEl.innerHTML = res.cachedAvg !== null
-                    ? `${res.cachedAvg.toFixed(1)} ms`
+                    ? `${res.cachedAvg.toFixed(1)} ms<br><small style="color:gray; font-size:11px;">[${cachedDetail}]</small>`
                     : "Fail";
             }
             if (uncachedEl) {
                 uncachedEl.innerHTML = res.uncachedAvg !== null
-                    ? `${res.uncachedAvg.toFixed(1)} ms`
+                    ? `${res.uncachedAvg.toFixed(1)} ms<br><small style="color:gray; font-size:11px;">[${uncachedDetail}]</small>`
                     : "Fail";
             }
             if (scoreEl) {
@@ -398,33 +410,43 @@ async function runMeasurements() {
             if (statusEl) {
                 statusEl.textContent = res.statusText;
             }
-            
+
+            // Log each resolver's individual measurements to browser console
+            console.log(`${resolver.name}: cached=[${cachedDetail}] uncached=[${uncachedDetail}] score=${res.score !== null ? res.score.toFixed(1) : 'N/A'}ms cors=${resolver.cors}`);
+
             // Telemetry (if opted in)
             if (optInBox.checked && res.cachedAvg !== null && res.uncachedAvg !== null) {
-                // To be implemented in Phase 8
                 console.log(`Telemetry: ${resolver.name} - Cached: ${res.cachedAvg.toFixed(1)}ms, Uncached: ${res.uncachedAvg.toFixed(1)}ms`);
             }
         });
 
-        // Collect successful resolvers for verification (limit to top 10 to protect API rate limits)
-        const toVerify = sortedResults.filter(r => r.score !== null).slice(0, 10);
-        
-        if (toVerify.length > 0) {
-            progress.innerHTML = `Measurements complete. <strong>🔍 Verifying top ${toVerify.length} resolvers...</strong>`;
-            
-            // Mark initial status of those being verified
-            toVerify.forEach(res => {
+        // Verification: separate CORS and no-CORS resolvers.
+        // CORS resolvers that returned valid DNS responses are inherently trusted
+        // because we parsed their answer records. Only no-CORS (opaque) resolvers
+        // need Cloudflare GraphQL verification to detect cheating.
+        const top10 = sortedResults.filter(r => r.score !== null).slice(0, 10);
+        const corsResolvers = top10.filter(r => r.resolver.cors && r.statusText === "Success");
+        const opaqueResolvers = top10.filter(r => !r.resolver.cors || r.statusText !== "Success");
+
+        // Auto-verify CORS resolvers immediately
+        corsResolvers.forEach(res => {
+            const statusEl = document.getElementById(`status-${res.resolver.id}`);
+            if (statusEl) {
+                statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ Verified (DNS)</span> <br><small style="color: gray; font-size:10px;">(CORS response parsed)</small>`;
+            }
+        });
+
+        if (opaqueResolvers.length > 0) {
+            progress.innerHTML = `Measurements complete. CORS: ${corsResolvers.length} auto-verified. <strong>🔍 Verifying ${opaqueResolvers.length} opaque resolvers...</strong>`;
+
+            opaqueResolvers.forEach(res => {
                 const statusEl = document.getElementById(`status-${res.resolver.id}`);
                 if (statusEl) {
-                    const typeStr = res.resolver.cors ? "CORS" : "No-CORS";
-                    statusEl.innerHTML = `<span style="color: #d35400;">Verifying... 🔍</span> <br><small style="color: gray; font-size:10px;">(${typeStr})</small>`;
+                    statusEl.innerHTML = `<span style="color: #d35400;">Verifying... 🔍</span> <br><small style="color: gray; font-size:10px;">(No-CORS)</small>`;
                 }
             });
 
-            // Verification polling with exponential backoff.
-            // Cloudflare GraphQL DNS Analytics has an ingestion lag of 5-60+ seconds,
-            // so we delay the first poll and use sparse backoff to avoid hammering the API
-            // while logs are still indexing.
+            // Verification polling with exponential backoff for opaque resolvers only
             const INITIAL_DELAY_MS = 10000;  // first poll delayed 10s
             const MAX_TOTAL_MS = 90000;       // 90s total budget
             const BACKOFF_SECS = [0, 8, 16, 32]; // intervals between successive polls
@@ -432,15 +454,13 @@ async function runMeasurements() {
             let pollIdx = 0;
             const startTs = Date.now();
 
-            // Initial delay before first poll
             await new Promise(r => setTimeout(r, INITIAL_DELAY_MS));
 
             while (true) {
-                const remaining = toVerify.filter(res => !verifiedIds.has(res.resolver.id));
+                const remaining = opaqueResolvers.filter(res => !verifiedIds.has(res.resolver.id));
                 if (remaining.length === 0) break;
                 if (Date.now() - startTs >= MAX_TOTAL_MS) break;
 
-                // Query verify endpoint concurrently for the remaining resolvers
                 await Promise.all(remaining.map(async (res) => {
                     if (!res.domains || !res.domains[0]) return;
                     const firstDomain = res.domains[0];
@@ -452,8 +472,7 @@ async function runMeasurements() {
                                 verifiedIds.add(res.resolver.id);
                                 const statusEl = document.getElementById(`status-${res.resolver.id}`);
                                 if (statusEl) {
-                                    const typeStr = res.resolver.cors ? "CORS" : "No-CORS";
-                                    statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ Verified</span> <br><small style="color: gray; font-size:10px;">(${typeStr})</small>`;
+                                    statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ Verified (Auth)</span> <br><small style="color: gray; font-size:10px;">(No-CORS, authoritative log match)</small>`;
                                 }
                             }
                         }
@@ -462,13 +481,12 @@ async function runMeasurements() {
                     }
                 }));
 
-                progress.innerHTML = `Measurements complete. <strong>Verifying... (${verifiedIds.size}/${toVerify.length} verified)</strong>`;
+                const totalVerified = corsResolvers.length + verifiedIds.size;
+                progress.innerHTML = `Measurements complete. CORS: ${corsResolvers.length} verified. <strong>Opaque: ${verifiedIds.size}/${opaqueResolvers.length} verified</strong>`;
 
-                // Check again after the concurrent fetch -- exit early if all done
-                const stillRemaining = toVerify.filter(res => !verifiedIds.has(res.resolver.id));
+                const stillRemaining = opaqueResolvers.filter(res => !verifiedIds.has(res.resolver.id));
                 if (stillRemaining.length === 0) break;
 
-                // Exponential backoff between polls
                 const delay = (BACKOFF_SECS[Math.min(pollIdx, BACKOFF_SECS.length - 1)] || 32) * 1000;
                 pollIdx++;
                 if (Date.now() - startTs + delay >= MAX_TOTAL_MS) break;
@@ -477,16 +495,15 @@ async function runMeasurements() {
 
             progress.innerHTML = `Measurements complete. <strong>Verification finished!</strong>`;
 
-            // Mark any still-unverified resolvers
-            toVerify.filter(res => !verifiedIds.has(res.resolver.id)).forEach(res => {
+            // Mark opaque resolvers that failed verification
+            opaqueResolvers.filter(res => !verifiedIds.has(res.resolver.id)).forEach(res => {
                 const statusEl = document.getElementById(`status-${res.resolver.id}`);
                 if (statusEl) {
-                    const typeStr = res.resolver.cors ? "CORS" : "No-CORS";
-                    statusEl.innerHTML = `<span style="color: #c0392b; font-weight: bold;">❌ Unverified</span> <br><small style="color: gray; font-size:10px;">(${typeStr})</small>`;
+                    statusEl.innerHTML = `<span style="color: #c0392b; font-weight: bold;">❌ Unverified</span> <br><small style="color: gray; font-size:10px;">(No-CORS, not in authoritative logs)</small>`;
                 }
             });
         } else {
-            progress.textContent = "Measurements complete. See results below.";
+            progress.innerHTML = `Measurements complete. <strong>All ${corsResolvers.length} top resolvers auto-verified via CORS.</strong>`;
         }
 
     } catch (err) {
