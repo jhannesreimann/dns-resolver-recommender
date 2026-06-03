@@ -8,13 +8,14 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .cloudflare import CloudflareClient, CloudflareError
 from .config import Settings, get_settings
 from .resolvers import get_resolvers
+from .telemetry import get_stats, store_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +221,64 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=str(exc),
+            ) from exc
+
+    class TelemetryPayload(BaseModel):
+        resolvers: list[dict]
+        userAgent: str | None = None
+        browserLang: str | None = None
+
+    class TelemetryResponse(BaseModel):
+        status: str
+        run_id: int | None = None
+        message: str | None = None
+
+    @app.post("/api/telemetry", response_model=TelemetryResponse, status_code=status.HTTP_201_CREATED)
+    async def submit_telemetry(
+        request: Request,
+        body: dict = Body(...),
+    ) -> TelemetryResponse:
+        """Store anonymized measurement results from a speedtest run.
+
+        Requires explicit opt-in from the user (checkbox in the frontend).
+        No raw IP addresses are stored -- only ASN and country are derived
+        via GeoLite2 lookup before the IP is discarded.
+        """
+        try:
+            result = await asyncio.to_thread(
+                store_telemetry,
+                body,
+                dict(request.headers),
+                request.client.host if request.client else None,
+            )
+            return TelemetryResponse(**result)
+        except Exception as exc:
+            logger.exception("Telemetry storage failed")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to store telemetry data",
+            ) from exc
+
+    class StatsResponse(BaseModel):
+        status: str
+        total_runs: int = 0
+        total_measurements: int = 0
+        top_resolvers: list[dict] = Field(default_factory=list)
+        cors_distribution: list[dict] = Field(default_factory=list)
+        country_distribution: list[dict] = Field(default_factory=list)
+        recent_runs: list[dict] = Field(default_factory=list)
+
+    @app.get("/api/stats", response_model=StatsResponse)
+    async def stats() -> StatsResponse:
+        """Return aggregate measurement statistics (no raw data exposed)."""
+        try:
+            data = await asyncio.to_thread(get_stats)
+            return StatsResponse(**data)
+        except Exception as exc:
+            logger.exception("Stats query failed")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to query statistics",
             ) from exc
 
     return app
