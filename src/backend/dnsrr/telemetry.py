@@ -104,20 +104,11 @@ def _hash_value(value: str, salt: str = "dnsrr-telemetry") -> str:
     return hashlib.sha256(f"{salt}:{value}".encode()).hexdigest()[:16]
 
 
-def _lookup_ip(ip_address: str) -> dict[str, Any]:
-    """Look up ASN and country from an IP address using GeoLite2 if available.
-
-    Returns dict with asn, asn_org, country keys. All values are None if the
-    GeoLite2 database is not available or the lookup fails. The raw IP is never
-    stored or logged.
-    """
-    result: dict[str, Any] = {"asn": None, "asn_org": None, "country": None}
-
-    geoip_db = os.environ.get("GEOLITE2_ASN_DB", "/var/lib/GeoIP/GeoLite2-ASN.mmdb")
-    country_db = os.environ.get("GEOLITE2_COUNTRY_DB", "/var/lib/GeoIP/GeoLite2-Country.mmdb")
-
+def _lookup_ip_geolite2(ip_address: str, geoip_db: str, country_db: str) -> dict[str, Any] | None:
+    """Try GeoLite2 local database lookup. Returns None if unavailable."""
     try:
         import geoip2.database  # type: ignore
+        result: dict[str, Any] = {"asn": None, "asn_org": None, "country": None}
 
         if os.path.isfile(geoip_db):
             with geoip2.database.Reader(geoip_db) as reader:
@@ -130,14 +121,65 @@ def _lookup_ip(ip_address: str) -> dict[str, Any]:
                 country_resp = reader.country(ip_address)
                 result["country"] = country_resp.country.iso_code
 
+        if result["country"] or result["asn"]:
+            return result
     except ImportError:
-        logger.debug("geoip2 not installed, skipping IP lookup")
-    except FileNotFoundError:
-        logger.debug("GeoLite2 database not found at %s or %s", geoip_db, country_db)
+        logger.debug("geoip2 not installed")
     except Exception:
-        logger.debug("GeoIP lookup failed for IP (not logged)", exc_info=True)
+        logger.debug("GeoLite2 lookup failed", exc_info=True)
+    return None
 
-    return result
+
+def _lookup_ip_api(ip_address: str) -> dict[str, Any] | None:
+    """Fallback: query ip-api.com (free tier, no key needed, 45 req/min)."""
+    if ip_address in ("0.0.0.0", "127.0.0.1", "::1", ""):
+        return None
+    try:
+        import urllib.request
+        url = f"http://ip-api.com/json/{ip_address}?fields=countryCode,as,org"
+        req = urllib.request.Request(url, headers={"User-Agent": "dnsrr/1.0"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+        if data.get("status") == "fail":
+            return None
+        result: dict[str, Any] = {"country": data.get("countryCode")}
+        as_str = data.get("as", "")
+        org_str = data.get("org", "")
+        # Parse "AS1234 Organization Name" format
+        if as_str.startswith("AS"):
+            parts = as_str.split(" ", 1)
+            try:
+                result["asn"] = int(parts[0][2:])
+            except (ValueError, IndexError):
+                pass
+            result["asn_org"] = parts[1] if len(parts) > 1 else org_str
+        elif org_str:
+            result["asn_org"] = org_str
+        return result
+    except Exception:
+        logger.debug("ip-api.com lookup failed", exc_info=True)
+        return None
+
+
+def _lookup_ip(ip_address: str) -> dict[str, Any]:
+    """Look up ASN and country from IP. Prefers local GeoLite2, falls back to ip-api.com.
+
+    The raw IP address is never stored or logged beyond the lookup call.
+    """
+    geoip_db = os.environ.get("GEOLITE2_ASN_DB", "/var/lib/GeoIP/GeoLite2-ASN.mmdb")
+    country_db = os.environ.get("GEOLITE2_COUNTRY_DB", "/var/lib/GeoIP/GeoLite2-Country.mmdb")
+
+    # Tier 1: local GeoLite2 (fast, offline, no rate limits)
+    result = _lookup_ip_geolite2(ip_address, geoip_db, country_db)
+    if result:
+        return result
+
+    # Tier 2: ip-api.com fallback (free, no key needed)
+    result = _lookup_ip_api(ip_address)
+    if result:
+        return result
+
+    return {"asn": None, "asn_org": None, "country": None}
 
 
 def _get_client_ip(request_headers: dict, client_host: str | None) -> str:
