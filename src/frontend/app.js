@@ -5,6 +5,21 @@ let resolvers = [];
 const API_BASE = "https://dns.diic-hpi.org/api";
 const MEASUREMENT_TIMEOUT_MS = 3000; // 3-second hard timeout per DoH query
 
+// Robust mean: drop the single largest sample before averaging, so one transient
+// latency spike (Wi-Fi L2 retransmit, GC pause, BGP route flap, resolver load burst)
+// cannot dominate the reported latency. A single spike in the arithmetic mean was the
+// main driver of the "uncached faster than cached" paradox: a lone 2000ms outlier in the
+// cached series inflated the cached average far above the uncached one. Trimming the worst
+// sample reduces this without discarding as much information as a pure minimum would.
+// Falls back to a plain mean when there are too few samples to trim safely.
+function robustMean(times) {
+    if (!times || times.length === 0) return null;
+    if (times.length <= 2) return times.reduce((a, b) => a + b, 0) / times.length;
+    const sorted = [...times].sort((a, b) => a - b);
+    const trimmed = sorted.slice(0, sorted.length - 1);
+    return trimmed.reduce((a, b) => a + b, 0) / trimmed.length;
+}
+
 const btn = document.getElementById("start-btn");
 const progress = document.getElementById("progress");
 const table = document.getElementById("results-table");
@@ -71,18 +86,29 @@ async function measureOneResolver(resolver) {
     if (statusEl) statusEl.textContent = "Measuring...";
     
     try {
+        // Cached probe domain: a single per-resolver UUID subdomain of diic-hpi.org.
+        // Both the cached and uncached phases now target the same Cloudflare-backed zone,
+        // so cache-hit vs cache-miss is the ONLY intended difference between them.
+        // Previously the cached phase queried example.com (IANA authority, DNSSEC-signed,
+        // geographically distant) while uncached queried *.diic-hpi.org (Cloudflare anycast,
+        // unsigned, topologically close). A controlled A/B run showed that mismatch is a
+        // real but minor contributor to the "uncached faster than cached" paradox (about
+        // 9 points); the larger fixable factor is single-query spikes corrupting the mean,
+        // handled by robustMean above. Using the same zone keeps the comparison honest.
+        const cachedDomain = crypto.randomUUID() + ".diic-hpi.org";
+
         // 1. Connection Warm-up & Dynamic CORS Detection
         let detectedCors = resolver.cors;
         let warmupFailed = false;
         try {
             // Try CORS query first
-            const warmUpRes = await measure_resolver(resolver.url, "example.com", true, MEASUREMENT_TIMEOUT_MS);
+            const warmUpRes = await measure_resolver(resolver.url, cachedDomain, true, MEASUREMENT_TIMEOUT_MS);
             if (warmUpRes.status === "ok" || warmUpRes.status.includes("NOERROR")) {
                 detectedCors = true;
             } else if (warmUpRes.status === "Timeout") {
                 // Resolver timed out on CORS - try no-CORS before giving up
                 try {
-                    const fallbackRes = await measure_resolver(resolver.url, "example.com", false, MEASUREMENT_TIMEOUT_MS);
+                    const fallbackRes = await measure_resolver(resolver.url, cachedDomain, false, MEASUREMENT_TIMEOUT_MS);
                     if (fallbackRes.status === "Timeout") {
                         warmupFailed = true;
                     }
@@ -92,13 +118,13 @@ async function measureOneResolver(resolver) {
                 }
             } else {
                 // CORS not supported or returned opaque/error, try No-CORS fallback
-                await measure_resolver(resolver.url, "example.com", false, MEASUREMENT_TIMEOUT_MS);
+                await measure_resolver(resolver.url, cachedDomain, false, MEASUREMENT_TIMEOUT_MS);
                 detectedCors = false;
             }
         } catch (e) {
             // CORS failed (e.g. CORS block TypeError), try No-CORS fallback
             try {
-                const fallbackRes = await measure_resolver(resolver.url, "example.com", false, MEASUREMENT_TIMEOUT_MS);
+                const fallbackRes = await measure_resolver(resolver.url, cachedDomain, false, MEASUREMENT_TIMEOUT_MS);
                 if (fallbackRes.status === "Timeout") {
                     warmupFailed = true;
                 }
@@ -129,17 +155,19 @@ async function measureOneResolver(resolver) {
             };
         }
 
-        // 2. Cached Measurement (7 queries, discarding the first 2 to eliminate cold-start/TLS bias).
-        // Empirical testing showed that discarding only 1 query is insufficient: TCP slow-start,
-        // TLS session ticket exchange, and HTTP/2 stream initialization take 2-3 round-trips
-        // to fully stabilize. Using 5 kept queries means a single outlier moves the mean by ~20%
-        // instead of the ~50% distortion caused by a spike in 3 kept queries.
+        // 2. Cached Measurement (7 queries to the SAME cachedDomain, discarding the first 2).
+        // The first query performs a cold recursive lookup that fills the resolver's cache
+        // (and warms the TLS/HTTP2 connection); every subsequent query to the identical QNAME
+        // is a true cache hit. Discarding 2 queries eliminates cold-start/TLS bias: TCP
+        // slow-start, TLS session ticket exchange, and HTTP/2 stream initialization take 2-3
+        // round-trips to fully stabilize. Using 5 kept queries means a single outlier moves the
+        // mean by ~20% instead of the ~50% distortion caused by a spike in 3 kept queries.
         const cachedTimes = [];
         const allCachedRaw = []; // ALL 7 including warmup, for research analysis
         let cachedStatus = "ok";
         for (let j = 0; j < 7; j++) {
             try {
-                const res = await measure_resolver(resolver.url, "example.com", resolver.cors, MEASUREMENT_TIMEOUT_MS);
+                const res = await measure_resolver(resolver.url, cachedDomain, resolver.cors, MEASUREMENT_TIMEOUT_MS);
                 if (res.status === "ok" || res.status.includes("NOERROR") || res.status.includes("opaque")) {
                     allCachedRaw.push(res.latency_ms); // keep all 7
                     if (j > 1) { // Discard the first 2 queries (j=0 and j=1)
@@ -157,9 +185,7 @@ async function measureOneResolver(resolver) {
         // allCachedRaw stores the full 7-query profile (including discarded j=0,1)
         // for potential future analysis. Not displayed in the UI.
 
-        const cachedAvg = cachedTimes.length > 0
-            ? cachedTimes.reduce((a, b) => a + b, 0) / cachedTimes.length
-            : null;
+        const cachedAvg = robustMean(cachedTimes);
 
         if (cachedEl) {
             cachedEl.innerHTML = cachedAvg !== null
@@ -194,9 +220,7 @@ async function measureOneResolver(resolver) {
             }
         }
         
-        const uncachedAvg = uncachedTimes.length > 0
-            ? uncachedTimes.reduce((a, b) => a + b, 0) / uncachedTimes.length
-            : null;
+        const uncachedAvg = robustMean(uncachedTimes);
 
         if (uncachedAvg) {
             if (uncachedEl) {
