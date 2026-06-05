@@ -423,58 +423,6 @@ async function runMeasurements() {
             console.log(`${resolver.name}: cached=[${cachedDetail}] uncached=[${uncachedDetail}] score=${res.score !== null ? res.score.toFixed(1) : 'N/A'}ms cors=${resolver.cors}`);
         });
 
-        // Submit telemetry if user opted in
-        if (optInBox.checked && sortedResults.length > 0) {
-            const telemetryPayload = {
-                userAgent: navigator.userAgent,
-                browserLang: navigator.language,
-                resolvers: sortedResults.map(res => {
-                    const r = res.resolver;
-                    const verificationEl = document.getElementById(`status-${r.id}`);
-                    let verificationStatus = "none";
-                    if (verificationEl) {
-                        const html = verificationEl.innerHTML || "";
-                        if (html.includes("Verified (DNS)")) verificationStatus = "verified_dns";
-                        else if (html.includes("Verified (Auth)")) verificationStatus = "verified_auth";
-                        else if (html.includes("Unverified")) verificationStatus = "unverified";
-                        else verificationStatus = verificationEl.textContent?.trim() || "unknown";
-                    }
-                    return {
-                        id: r.id,
-                        name: r.name,
-                        url: r.url,
-                        cachedAvgMs: res.cachedAvg,
-                        uncachedAvgMs: res.uncachedAvg,
-                        scoreMs: res.score,
-                        cors: r.cors,
-                        dnssec: r.dnssec,
-                        noLogs: r.no_logs,
-                        noFilter: r.no_filter,
-                        country: r.country,
-                        verificationStatus: verificationStatus,
-                        cachedTimes: res.cachedTimes || [],
-                        uncachedTimes: res.uncachedTimes || [],
-                    };
-                })
-            };
-
-            try {
-                const telRes = await fetch(`${API_BASE}/telemetry`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(telemetryPayload),
-                });
-                if (telRes.ok) {
-                    const telData = await telRes.json();
-                    console.log(`Telemetry stored: run_id=${telData.run_id}, ${telemetryPayload.resolvers.length} resolvers`);
-                } else {
-                    console.error("Telemetry submission failed:", telRes.status);
-                }
-            } catch (e) {
-                console.error("Telemetry submission error:", e);
-            }
-        }
-
         // Verification: two-tier trust architecture.
         // Tier 1: ALL CORS resolvers with valid DNS responses are inherently trusted
         // because we parsed their A record answers. They get "Verified (DNS)" immediately.
@@ -561,6 +509,58 @@ async function runMeasurements() {
             });
         } else {
             progress.innerHTML = `Measurements complete. <strong>All resolvers auto-verified via CORS.</strong>`;
+        }
+
+        // Submit telemetry if user opted in (after verification so badges are set)
+        if (optInBox.checked && sortedResults.length > 0) {
+            const telemetryPayload = {
+                userAgent: navigator.userAgent,
+                browserLang: navigator.language,
+                resolvers: sortedResults.map(res => {
+                    const r = res.resolver;
+                    const verificationEl = document.getElementById(`status-${r.id}`);
+                    let verificationStatus = "none";
+                    if (verificationEl) {
+                        const html = verificationEl.innerHTML || "";
+                        if (html.includes("Verified (DNS)")) verificationStatus = "verified_dns";
+                        else if (html.includes("Verified (Auth)")) verificationStatus = "verified_auth";
+                        else if (html.includes("Unverified")) verificationStatus = "unverified";
+                        else verificationStatus = verificationEl.textContent?.trim() || "unknown";
+                    }
+                    return {
+                        id: r.id,
+                        name: r.name,
+                        url: r.url,
+                        cachedAvgMs: res.cachedAvg,
+                        uncachedAvgMs: res.uncachedAvg,
+                        scoreMs: res.score,
+                        cors: r.cors,
+                        dnssec: r.dnssec,
+                        noLogs: r.no_logs,
+                        noFilter: r.no_filter,
+                        country: r.country,
+                        verificationStatus: verificationStatus,
+                        cachedTimes: res.cachedTimes || [],
+                        uncachedTimes: res.uncachedTimes || [],
+                    };
+                })
+            };
+
+            try {
+                const telRes = await fetch(`${API_BASE}/telemetry`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(telemetryPayload),
+                });
+                if (telRes.ok) {
+                    const telData = await telRes.json();
+                    console.log(`Telemetry stored: run_id=${telData.run_id}, ${telemetryPayload.resolvers.length} resolvers`);
+                } else {
+                    console.error("Telemetry submission failed:", telRes.status);
+                }
+            } catch (e) {
+                console.error("Telemetry submission error:", e);
+            }
         }
 
     } catch (err) {
