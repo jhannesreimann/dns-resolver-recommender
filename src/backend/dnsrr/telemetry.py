@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS runs (
     cors_count INTEGER NOT NULL,
     opaque_count INTEGER NOT NULL,
     dead_count INTEGER NOT NULL,
+    verified_dns_count INTEGER NOT NULL DEFAULT 0,
+    verified_auth_count INTEGER NOT NULL DEFAULT 0,
+    unverified_count INTEGER NOT NULL DEFAULT 0,
+    paradox_count INTEGER NOT NULL DEFAULT 0,
     avg_cached_ms REAL,
     avg_uncached_ms REAL
 );
@@ -53,6 +57,7 @@ CREATE TABLE IF NOT EXISTS measurements (
     no_filter INTEGER NOT NULL,
     resolver_country TEXT,
     verification_status TEXT,
+    paradox INTEGER NOT NULL DEFAULT 0,
     cached_times TEXT,
     uncached_times TEXT
 );
@@ -74,7 +79,24 @@ def _ensure_db(db_path: str) -> None:
     conn = sqlite3.connect(db_path)
     conn.executescript(_SCHEMA_SQL)
     conn.commit()
+
+    # Migrate: add columns that may not exist in older databases
+    _migrate_add_column(conn, "runs", "verified_dns_count", "INTEGER NOT NULL DEFAULT 0")
+    _migrate_add_column(conn, "runs", "verified_auth_count", "INTEGER NOT NULL DEFAULT 0")
+    _migrate_add_column(conn, "runs", "unverified_count", "INTEGER NOT NULL DEFAULT 0")
+    _migrate_add_column(conn, "runs", "paradox_count", "INTEGER NOT NULL DEFAULT 0")
+    _migrate_add_column(conn, "measurements", "paradox", "INTEGER NOT NULL DEFAULT 0")
+
     conn.close()
+
+
+def _migrate_add_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
+    """Add a column to a table if it does not already exist."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        logger.info("Migrating %s: adding column %s %s", table, column, col_type)
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+        conn.commit()
 
 
 def _hash_value(value: str, salt: str = "dnsrr-telemetry") -> str:
@@ -142,10 +164,21 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
 
     resolver_data = payload.get("resolvers", [])
     total = len(resolver_data)
+    # cors = dynamically detected CORS-capable (browser-side probe succeeded)
     cors_count = sum(1 for r in resolver_data if r.get("cors"))
     opaque_count = sum(1 for r in resolver_data if not r.get("cors"))
     valid = [r for r in resolver_data if r.get("cachedAvgMs") is not None and r.get("uncachedAvgMs") is not None]
     dead_count = total - len([r for r in resolver_data if r.get("cachedAvgMs") is not None or r.get("uncachedAvgMs") is not None])
+
+    # Verification breakdown
+    ver_statuses = [r.get("verificationStatus", "") for r in resolver_data]
+    verified_dns_count = sum(1 for s in ver_statuses if s == "verified_dns")
+    verified_auth_count = sum(1 for s in ver_statuses if s == "verified_auth")
+    unverified_count = sum(1 for s in ver_statuses if s == "unverified")
+
+    # Paradox: uncached faster than cached (both must be valid measurements)
+    paradox_count = sum(1 for r in valid
+                        if r["uncachedAvgMs"] < r["cachedAvgMs"])
 
     avg_cached = sum(r["cachedAvgMs"] for r in valid) / len(valid) if valid else None
     avg_uncached = sum(r["uncachedAvgMs"] for r in valid) / len(valid) if valid else None
@@ -160,8 +193,9 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
         cursor = conn.execute(
             """INSERT INTO runs (timestamp, asn, asn_org, country, browser_hash,
                browser_lang, total_resolvers, cors_count, opaque_count, dead_count,
+               verified_dns_count, verified_auth_count, unverified_count, paradox_count,
                avg_cached_ms, avg_uncached_ms)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 datetime.now(timezone.utc).isoformat(),
                 geo["asn"],
@@ -173,6 +207,10 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
                 cors_count,
                 opaque_count,
                 dead_count,
+                verified_dns_count,
+                verified_auth_count,
+                unverified_count,
+                paradox_count,
                 avg_cached,
                 avg_uncached,
             ),
@@ -184,8 +222,8 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
                 """INSERT INTO measurements (run_id, resolver_id, resolver_name,
                    resolver_url, cached_avg_ms, uncached_avg_ms, score_ms, cors,
                    dnssec, no_logs, no_filter, resolver_country, verification_status,
-                   cached_times, uncached_times)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   paradox, cached_times, uncached_times)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     run_id,
                     r.get("id", "unknown"),
@@ -200,14 +238,16 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
                     1 if r.get("noFilter") else 0,
                     r.get("country"),
                     r.get("verificationStatus"),
+                    1 if (r.get("uncachedAvgMs") is not None and r.get("cachedAvgMs") is not None
+                          and r["uncachedAvgMs"] < r["cachedAvgMs"]) else 0,
                     json.dumps(r.get("cachedTimes", [])) if r.get("cachedTimes") else None,
                     json.dumps(r.get("uncachedTimes", [])) if r.get("uncachedTimes") else None,
                 ),
             )
 
         conn.commit()
-        logger.info("Stored telemetry run %s: %d resolvers, %d CORS, geo=%s/%s",
-                     run_id, total, cors_count, geo.get("country"), geo.get("asn_org"))
+        logger.info("Stored run %s: %d resolvers, %d CORS-capable, %d verified-dns, %d verified-auth, %d paradox, geo=%s/%s",
+                     run_id, total, cors_count, verified_dns_count, verified_auth_count, paradox_count, geo.get("country"), geo.get("asn_org"))
 
         return {"status": "ok", "run_id": run_id}
 
@@ -222,8 +262,7 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
 def get_stats() -> dict:
     """Return aggregate statistics for the dashboard/research."""
     db_path = _get_db_path()
-    if not os.path.isfile(db_path):
-        return {"status": "ok", "runs": 0, "measurements": 0}
+    _ensure_db(db_path)
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -253,7 +292,7 @@ def get_stats() -> dict:
 
         # Recent runs
         recent = conn.execute(
-            "SELECT id, timestamp, country, asn_org, total_resolvers, cors_count, ROUND(avg_cached_ms,1) as avg_cached, ROUND(avg_uncached_ms,1) as avg_uncached FROM runs ORDER BY id DESC LIMIT 20"
+            "SELECT id, timestamp, country, asn_org, total_resolvers, cors_count, verified_dns_count, verified_auth_count, unverified_count, paradox_count, ROUND(avg_cached_ms,1) as avg_cached, ROUND(avg_uncached_ms,1) as avg_uncached FROM runs ORDER BY id DESC LIMIT 20"
         ).fetchall()
 
         return {
