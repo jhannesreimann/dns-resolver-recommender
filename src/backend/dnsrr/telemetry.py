@@ -1,16 +1,17 @@
 """Telemetry storage: SQLite database for measurement data collection.
 
 Stores per-test-run metadata and per-resolver latency measurements. No raw IP
-addresses are stored -- ASN and country are looked up from GeoLite2 (if
-available) and the IP is discarded immediately.
+addresses are stored -- ASN and country are looked up from the local GeoLite2
+database and the IP is discarded immediately. The raw User-Agent is never stored
+either: it is parsed into coarse, non-identifying browser and OS families.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -28,7 +29,9 @@ CREATE TABLE IF NOT EXISTS runs (
     asn INTEGER,
     asn_org TEXT,
     country TEXT,
-    browser_hash TEXT,
+    browser_family TEXT,
+    browser_major TEXT,
+    os_family TEXT,
     browser_lang TEXT,
     total_resolvers INTEGER NOT NULL,
     cors_count INTEGER NOT NULL,
@@ -85,6 +88,9 @@ def _ensure_db(db_path: str) -> None:
     _migrate_add_column(conn, "runs", "verified_auth_count", "INTEGER NOT NULL DEFAULT 0")
     _migrate_add_column(conn, "runs", "unverified_count", "INTEGER NOT NULL DEFAULT 0")
     _migrate_add_column(conn, "runs", "paradox_count", "INTEGER NOT NULL DEFAULT 0")
+    _migrate_add_column(conn, "runs", "browser_family", "TEXT")
+    _migrate_add_column(conn, "runs", "browser_major", "TEXT")
+    _migrate_add_column(conn, "runs", "os_family", "TEXT")
     _migrate_add_column(conn, "measurements", "paradox", "INTEGER NOT NULL DEFAULT 0")
 
     conn.close()
@@ -99,9 +105,53 @@ def _migrate_add_column(conn: sqlite3.Connection, table: str, column: str, col_t
         conn.commit()
 
 
-def _hash_value(value: str, salt: str = "dnsrr-telemetry") -> str:
-    """One-way hash a string value for privacy."""
-    return hashlib.sha256(f"{salt}:{value}".encode()).hexdigest()[:16]
+def _parse_user_agent(ua: str | None) -> dict[str, str | None]:
+    """Parse a User-Agent string into coarse, non-identifying research fields.
+
+    Returns the browser family (e.g. Chrome, Firefox, Safari), the browser major
+    version, and the OS family (e.g. Windows, macOS, Linux, Android, iOS). The raw
+    User-Agent is intentionally discarded: these low-cardinality categories answer
+    "which browser/OS did users run" for research without acting as a per-device
+    fingerprint, so the stored data stays anonymous rather than pseudonymous.
+    """
+    result: dict[str, str | None] = {"browser": None, "version": None, "os": None}
+    if not ua:
+        return result
+
+    # OS family. Order matters: Android contains "Linux", iOS contains "like Mac".
+    if "Windows NT" in ua:
+        result["os"] = "Windows"
+    elif "Android" in ua:
+        result["os"] = "Android"
+    elif "iPhone" in ua or "iPad" in ua or "iPod" in ua:
+        result["os"] = "iOS"
+    elif "CrOS" in ua:
+        result["os"] = "ChromeOS"
+    elif "Mac OS X" in ua or "Macintosh" in ua:
+        result["os"] = "macOS"
+    elif "Linux" in ua:
+        result["os"] = "Linux"
+
+    # Browser family. Order matters: Edge/Opera/branded Chromium must be checked
+    # before Chrome, and Chrome before Safari (Chrome UAs also contain "Safari").
+    browser_patterns = [
+        ("Edge", r"Edg(?:e|A|iOS)?/(\d+)"),
+        ("Opera", r"(?:OPR|Opera)/(\d+)"),
+        ("Samsung Internet", r"SamsungBrowser/(\d+)"),
+        ("Chrome", r"CriOS/(\d+)"),
+        ("Firefox", r"FxiOS/(\d+)"),
+        ("Firefox", r"Firefox/(\d+)"),
+        ("Chrome", r"(?:Chrome|Chromium)/(\d+)"),
+        ("Safari", r"Version/(\d+)[\d.]*\s+(?:Mobile/\S+\s+)?Safari"),
+    ]
+    for name, pattern in browser_patterns:
+        match = re.search(pattern, ua)
+        if match:
+            result["browser"] = name
+            result["version"] = match.group(1)
+            break
+
+    return result
 
 
 def _lookup_ip_geolite2(ip_address: str, geoip_db: str, country_db: str) -> dict[str, Any] | None:
@@ -130,52 +180,16 @@ def _lookup_ip_geolite2(ip_address: str, geoip_db: str, country_db: str) -> dict
     return None
 
 
-def _lookup_ip_api(ip_address: str) -> dict[str, Any] | None:
-    """Fallback: query ip-api.com (free tier, no key needed, 45 req/min)."""
-    if ip_address in ("0.0.0.0", "127.0.0.1", "::1", ""):
-        return None
-    try:
-        import urllib.request
-        url = f"http://ip-api.com/json/{ip_address}?fields=countryCode,as,org"
-        req = urllib.request.Request(url, headers={"User-Agent": "dnsrr/1.0"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read())
-        if data.get("status") == "fail":
-            return None
-        result: dict[str, Any] = {"country": data.get("countryCode")}
-        as_str = data.get("as", "")
-        org_str = data.get("org", "")
-        # Parse "AS1234 Organization Name" format
-        if as_str.startswith("AS"):
-            parts = as_str.split(" ", 1)
-            try:
-                result["asn"] = int(parts[0][2:])
-            except (ValueError, IndexError):
-                pass
-            result["asn_org"] = parts[1] if len(parts) > 1 else org_str
-        elif org_str:
-            result["asn_org"] = org_str
-        return result
-    except Exception:
-        logger.debug("ip-api.com lookup failed", exc_info=True)
-        return None
-
-
 def _lookup_ip(ip_address: str) -> dict[str, Any]:
-    """Look up ASN and country from IP. Prefers local GeoLite2, falls back to ip-api.com.
+    """Look up ASN and country from IP using the local GeoLite2 database.
 
-    The raw IP address is never stored or logged beyond the lookup call.
+    The raw IP address is never stored, logged, or sent to any third party: it is
+    used only in-memory for this offline lookup and then discarded.
     """
     geoip_db = os.environ.get("GEOLITE2_ASN_DB", "/var/lib/GeoIP/GeoLite2-ASN.mmdb")
     country_db = os.environ.get("GEOLITE2_COUNTRY_DB", "/var/lib/GeoIP/GeoLite2-Country.mmdb")
 
-    # Tier 1: local GeoLite2 (fast, offline, no rate limits)
     result = _lookup_ip_geolite2(ip_address, geoip_db, country_db)
-    if result:
-        return result
-
-    # Tier 2: ip-api.com fallback (free, no key needed)
-    result = _lookup_ip_api(ip_address)
     if result:
         return result
 
@@ -231,19 +245,23 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
 
+    ua = _parse_user_agent(payload.get("userAgent"))
+
     try:
         cursor = conn.execute(
-            """INSERT INTO runs (timestamp, asn, asn_org, country, browser_hash,
-               browser_lang, total_resolvers, cors_count, opaque_count, dead_count,
-               verified_dns_count, verified_auth_count, unverified_count, paradox_count,
-               avg_cached_ms, avg_uncached_ms)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO runs (timestamp, asn, asn_org, country, browser_family,
+               browser_major, os_family, browser_lang, total_resolvers, cors_count,
+               opaque_count, dead_count, verified_dns_count, verified_auth_count,
+               unverified_count, paradox_count, avg_cached_ms, avg_uncached_ms)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 datetime.now(timezone.utc).isoformat(),
                 geo["asn"],
                 geo["asn_org"],
                 geo["country"],
-                _hash_value(payload.get("userAgent", "")) if payload.get("userAgent") else None,
+                ua["browser"],
+                ua["version"],
+                ua["os"],
                 payload.get("browserLang"),
                 total,
                 cors_count,
