@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -191,14 +191,10 @@ def create_app() -> FastAPI:
         
         Requires Cloudflare 'Analytics: Read' permission.
         """
-        # If 'since' is not provided, default to last 10 minutes in ISO UTC format
+        # If 'since' is not provided, default to last 10 minutes.
+        # Must be UTC (Z suffix): Cloudflare's GraphQL API only accepts UTC timestamps.
         if not since:
-            since = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-            # subtract 10 minutes (we can do a timedelta)
-            from datetime import timedelta
-            now_dt = datetime.now(timezone.utc)
-            since_dt = now_dt - timedelta(minutes=10)
-            since = since_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            since = (datetime.now(timezone.utc) - timedelta(minutes=10)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
         try:
             result = await cf.verify_dns_query(domain, since)

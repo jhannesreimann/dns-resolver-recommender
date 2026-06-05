@@ -14,7 +14,8 @@ import os
 import re
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
 
@@ -255,7 +256,8 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
                unverified_count, paradox_count, avg_cached_ms, avg_uncached_ms)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                datetime.now(timezone.utc).isoformat(),
+                # Europe/Berlin timestamp with correct DST offset (+01:00 or +02:00)
+                datetime.now(ZoneInfo("Europe/Berlin")).isoformat(),
                 geo["asn"],
                 geo["asn_org"],
                 geo["country"],
