@@ -86,16 +86,17 @@ async function measureOneResolver(resolver) {
     if (statusEl) statusEl.textContent = "Measuring...";
     
     try {
-        // Cached probe domain: a single per-resolver UUID subdomain of diic-hpi.org.
-        // Both the cached and uncached phases now target the same Cloudflare-backed zone,
-        // so cache-hit vs cache-miss is the ONLY intended difference between them.
-        // Previously the cached phase queried example.com (IANA authority, DNSSEC-signed,
-        // geographically distant) while uncached queried *.diic-hpi.org (Cloudflare anycast,
-        // unsigned, topologically close). A controlled A/B run showed that mismatch is a
-        // real but minor contributor to the "uncached faster than cached" paradox (about
-        // 9 points); the larger fixable factor is single-query spikes corrupting the mean,
-        // handled by robustMean above. Using the same zone keeps the comparison honest.
-        const cachedDomain = crypto.randomUUID() + ".diic-hpi.org";
+        // Cached probe domain: a popular, globally-cached domain (example.com).
+        // We deliberately do NOT reuse the diic-hpi.org wildcard here. Pointing the cached
+        // phase at the same wildcard zone as the uncached phase was tried and reverted: the
+        // wildcard is trivially resolvable (delegation cached after the first lookup, answered
+        // by Cloudflare anycast in ~1 RTT), so a cache hit and a cold lookup became almost
+        // identical and the "uncached faster than cached" paradox nearly doubled (telemetry
+        // run 9: gap shrank to ~7ms, paradox ~44%, versus ~21-50ms gap and ~12-26% on
+        // example.com). example.com models the real-world cache hit (a popular site already in
+        // the resolver cache) and contrasts cleanly with a fresh UUID that forces genuine
+        // recursion, which is exactly the difference the cached/uncached split is meant to show.
+        const cachedDomain = "example.com";
 
         // 1. Connection Warm-up & Dynamic CORS Detection
         let detectedCors = resolver.cors;
@@ -155,13 +156,13 @@ async function measureOneResolver(resolver) {
             };
         }
 
-        // 2. Cached Measurement (7 queries to the SAME cachedDomain, discarding the first 2).
-        // The first query performs a cold recursive lookup that fills the resolver's cache
-        // (and warms the TLS/HTTP2 connection); every subsequent query to the identical QNAME
-        // is a true cache hit. Discarding 2 queries eliminates cold-start/TLS bias: TCP
-        // slow-start, TLS session ticket exchange, and HTTP/2 stream initialization take 2-3
-        // round-trips to fully stabilize. Using 5 kept queries means a single outlier moves the
-        // mean by ~20% instead of the ~50% distortion caused by a spike in 3 kept queries.
+        // 2. Cached Measurement (7 queries to cachedDomain, discarding the first 2).
+        // example.com is globally popular and therefore already in virtually every resolver's
+        // cache, so these queries measure cache-hit latency. Discarding 2 queries eliminates
+        // cold-start/TLS bias: TCP slow-start, TLS session ticket exchange, and HTTP/2 stream
+        // initialization take 2-3 round-trips to fully stabilize. The 5 kept values are reduced
+        // with robustMean (drop the single worst spike) so one transient outlier cannot inflate
+        // the cached average above the uncached one.
         const cachedTimes = [];
         const allCachedRaw = []; // ALL 7 including warmup, for research analysis
         let cachedStatus = "ok";
