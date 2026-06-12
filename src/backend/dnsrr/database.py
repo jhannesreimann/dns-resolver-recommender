@@ -144,6 +144,14 @@ postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DATAB
     def initialize_database(self) -> bool:
         db_conn = self.connect()
         db_conn.execute(_SCHEMA_SQL)
+        # Migrations: add columns that may not exist in older databases
+        for col, col_type in [
+            ("client_http_version", "TEXT"),
+            ("client_ip_version", "INTEGER"),
+        ]:
+            db_conn.execute(
+                f"ALTER TABLE runs ADD COLUMN IF NOT EXISTS {col} {col_type}"
+            )
         db_conn.commit()
         db_conn.close()
         return True
