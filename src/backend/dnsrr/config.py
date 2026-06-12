@@ -31,6 +31,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Database configuration
+    db_user: str = Field("postgres", alias="DATABASE_USER")
+    db_password: str = Field("postgres", alias="DATABASE_PASSWORD")
+    db_host: str = Field("127.0.0.1", alias="DATABASE_HOST")
+    db_name: str = Field("postgres", alias="DATABASE_NAME")
+    db_port: int = Field(15432, alias="DATABASE_PORT")
+
 
 _cached_settings: Settings | None = None
 

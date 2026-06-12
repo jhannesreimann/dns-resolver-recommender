@@ -12,6 +12,8 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from dnsrr.database import DatabaseParameters, PostgresDatabase
+
 from .cloudflare import CloudflareClient, CloudflareError
 from .config import Settings, get_settings
 from .resolvers import get_resolvers
@@ -67,7 +69,7 @@ async def _cleanup_loop(client: CloudflareClient, comment_filter: str) -> None:
             break
         except Exception:
             logger.exception("Cleanup task failed, retrying in next cycle")
-        
+
         await asyncio.sleep(60)
 
 
@@ -79,9 +81,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         zone_id=settings.zone_id,
     )
     app.state.cloudflare = client
-    
+
     cleanup_task = asyncio.create_task(_cleanup_loop(client, settings.record_comment))
-    
+
     try:
         yield
     finally:
@@ -93,6 +95,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await client.aclose()
 
 
+db = None
 def create_app() -> FastAPI:
     """FastAPI application factory."""
     settings = get_settings()
@@ -101,6 +104,17 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=_lifespan,
     )
+
+    db_params = DatabaseParameters(
+        user=settings.db_user,
+        password=settings.db_password,
+        host=settings.db_host,
+        database=settings.db_name,
+        port=settings.db_port
+    )
+
+    db = PostgresDatabase(db_params)
+    db.initialize_database()
 
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(
@@ -188,7 +202,7 @@ def create_app() -> FastAPI:
         cf: CloudflareClient = Depends(_client),
     ) -> VerifyResponse:
         """Query the Cloudflare GraphQL API to see if the domain was queried.
-        
+
         Requires Cloudflare 'Analytics: Read' permission.
         """
         # If 'since' is not provided, default to last 10 minutes.
@@ -204,7 +218,7 @@ def create_app() -> FastAPI:
                     error_code=result.get("error_code"),
                     message=result.get("message"),
                 )
-            
+
             queries = result.get("queries", [])
             return VerifyResponse(
                 status="ok",
@@ -243,6 +257,7 @@ def create_app() -> FastAPI:
         try:
             result = await asyncio.to_thread(
                 store_telemetry,
+                db,
                 body,
                 dict(request.headers),
                 request.client.host if request.client else None,
@@ -268,7 +283,7 @@ def create_app() -> FastAPI:
     async def stats() -> StatsResponse:
         """Return aggregate measurement statistics (no raw data exposed)."""
         try:
-            data = await asyncio.to_thread(get_stats)
+            data = await asyncio.to_thread(get_stats, db=db)
             return StatsResponse(**data)
         except Exception as exc:
             logger.exception("Stats query failed")
