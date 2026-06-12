@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS runs (
     unverified_count INTEGER NOT NULL DEFAULT 0,
     paradox_count INTEGER NOT NULL DEFAULT 0,
     avg_cached_ms REAL,
-    avg_uncached_ms REAL
+    avg_uncached_ms REAL,
+    client_http_version TEXT,
+    client_ip_version INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS measurements (

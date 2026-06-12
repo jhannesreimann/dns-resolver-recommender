@@ -261,6 +261,7 @@ def create_app() -> FastAPI:
                 body,
                 dict(request.headers),
                 request.client.host if request.client else None,
+                request.scope.get("http_version", ""),
             )
             return TelemetryResponse(**result)
         except Exception as exc:

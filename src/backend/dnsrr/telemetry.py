@@ -119,7 +119,14 @@ def _get_client_ip(request_headers: dict, client_host: str | None) -> str:
         return forwarded.split(",")[0].strip()
     return client_host or "0.0.0.0"
 
-def store_telemetry(db: PostgresDatabase, payload: dict, request_headers: dict, client_host: str | None) -> dict:
+
+def _get_ip_version(ip: str) -> int:
+    """Return 4 or 6 for the given IP address string."""
+    return 6 if ":" in ip else 4
+
+
+def store_telemetry(db: PostgresDatabase, payload: dict, request_headers: dict,
+                    client_host: str | None, client_http_version: str = "") -> dict:
     """Store a complete measurement run in the database.
 
     Args:
@@ -132,6 +139,7 @@ def store_telemetry(db: PostgresDatabase, payload: dict, request_headers: dict, 
     """
     client_ip = _get_client_ip(request_headers, client_host)
     geo = _lookup_ip(client_ip)
+    ip_version = _get_ip_version(client_ip)
 
     resolver_data = payload.get("resolvers", [])
     total = len(resolver_data)
@@ -162,8 +170,9 @@ def store_telemetry(db: PostgresDatabase, payload: dict, request_headers: dict, 
             """INSERT INTO runs (timestamp, asn, asn_org, country, browser_family,
                browser_major, os_family, browser_lang, total_resolvers, cors_count,
                opaque_count, dead_count, verified_dns_count, verified_auth_count,
-               unverified_count, paradox_count, avg_cached_ms, avg_uncached_ms)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               unverified_count, paradox_count, avg_cached_ms, avg_uncached_ms,
+               client_http_version, client_ip_version)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                RETURNING id;""",
             (
                 # Europe/Berlin timestamp with correct DST offset (+01:00 or +02:00)
@@ -185,6 +194,8 @@ def store_telemetry(db: PostgresDatabase, payload: dict, request_headers: dict, 
                 paradox_count,
                 avg_cached,
                 avg_uncached,
+                client_http_version,
+                ip_version,
             ),
         ).fetchone()
         if cursor is not None:
@@ -271,7 +282,7 @@ ORDER BY avg_score ASC LIMIT 10
 
         # Recent runs
         recent = db_conn.execute(
-            "SELECT id, timestamp, country, asn_org, total_resolvers, cors_count, verified_dns_count, verified_auth_count, unverified_count, paradox_count, ROUND(CAST(avg_cached_ms as numeric),1) as avg_cached, ROUND(CAST(avg_uncached_ms as numeric),1) as avg_uncached FROM runs ORDER BY id DESC LIMIT 20"
+            "SELECT id, timestamp, country, asn_org, total_resolvers, cors_count, verified_dns_count, verified_auth_count, unverified_count, paradox_count, ROUND(CAST(avg_cached_ms as numeric),1) as avg_cached, ROUND(CAST(avg_uncached_ms as numeric),1) as avg_uncached, client_http_version, client_ip_version FROM runs ORDER BY id DESC LIMIT 20"
         ).fetchall()
 
         return {
