@@ -12,99 +12,14 @@ import json
 import logging
 import os
 import re
-import sqlite3
-import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from pathlib import Path
 from typing import Any
+import psycopg
+
+from dnsrr.database import PostgresDatabase
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_DB_PATH = "/var/lib/dnsrr/telemetry.db"
-
-_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT NOT NULL,
-    asn INTEGER,
-    asn_org TEXT,
-    country TEXT,
-    browser_family TEXT,
-    browser_major TEXT,
-    os_family TEXT,
-    browser_lang TEXT,
-    total_resolvers INTEGER NOT NULL,
-    cors_count INTEGER NOT NULL,
-    opaque_count INTEGER NOT NULL,
-    dead_count INTEGER NOT NULL,
-    verified_dns_count INTEGER NOT NULL DEFAULT 0,
-    verified_auth_count INTEGER NOT NULL DEFAULT 0,
-    unverified_count INTEGER NOT NULL DEFAULT 0,
-    paradox_count INTEGER NOT NULL DEFAULT 0,
-    avg_cached_ms REAL,
-    avg_uncached_ms REAL
-);
-
-CREATE TABLE IF NOT EXISTS measurements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    resolver_id TEXT NOT NULL,
-    resolver_name TEXT NOT NULL,
-    resolver_url TEXT NOT NULL,
-    cached_avg_ms REAL,
-    uncached_avg_ms REAL,
-    score_ms REAL,
-    cors INTEGER NOT NULL,
-    dnssec INTEGER NOT NULL,
-    no_logs INTEGER NOT NULL,
-    no_filter INTEGER NOT NULL,
-    resolver_country TEXT,
-    verification_status TEXT,
-    paradox INTEGER NOT NULL DEFAULT 0,
-    cached_times TEXT,
-    uncached_times TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_measurements_run ON measurements(run_id);
-CREATE INDEX IF NOT EXISTS idx_measurements_resolver ON measurements(resolver_id);
-CREATE INDEX IF NOT EXISTS idx_measurements_score ON measurements(score_ms);
-CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs(timestamp);
-"""
-
-
-def _get_db_path() -> str:
-    return os.environ.get("TELEMETRY_DB_PATH", DEFAULT_DB_PATH)
-
-
-def _ensure_db(db_path: str) -> None:
-    """Create database directory and initialize schema if needed."""
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.executescript(_SCHEMA_SQL)
-    conn.commit()
-
-    # Migrate: add columns that may not exist in older databases
-    _migrate_add_column(conn, "runs", "verified_dns_count", "INTEGER NOT NULL DEFAULT 0")
-    _migrate_add_column(conn, "runs", "verified_auth_count", "INTEGER NOT NULL DEFAULT 0")
-    _migrate_add_column(conn, "runs", "unverified_count", "INTEGER NOT NULL DEFAULT 0")
-    _migrate_add_column(conn, "runs", "paradox_count", "INTEGER NOT NULL DEFAULT 0")
-    _migrate_add_column(conn, "runs", "browser_family", "TEXT")
-    _migrate_add_column(conn, "runs", "browser_major", "TEXT")
-    _migrate_add_column(conn, "runs", "os_family", "TEXT")
-    _migrate_add_column(conn, "measurements", "paradox", "INTEGER NOT NULL DEFAULT 0")
-
-    conn.close()
-
-
-def _migrate_add_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
-    """Add a column to a table if it does not already exist."""
-    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
-    if column not in existing:
-        logger.info("Migrating %s: adding column %s %s", table, column, col_type)
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
-        conn.commit()
-
 
 def _parse_user_agent(ua: str | None) -> dict[str, str | None]:
     """Parse a User-Agent string into coarse, non-identifying research fields.
@@ -204,8 +119,7 @@ def _get_client_ip(request_headers: dict, client_host: str | None) -> str:
         return forwarded.split(",")[0].strip()
     return client_host or "0.0.0.0"
 
-
-def store_telemetry(payload: dict, request_headers: dict, client_host: str | None) -> dict:
+def store_telemetry(db: PostgresDatabase, payload: dict, request_headers: dict, client_host: str | None) -> dict:
     """Store a complete measurement run in the database.
 
     Args:
@@ -240,21 +154,17 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
     avg_cached = sum(r["cachedAvgMs"] for r in valid) / len(valid) if valid else None
     avg_uncached = sum(r["uncachedAvgMs"] for r in valid) / len(valid) if valid else None
 
-    db_path = _get_db_path()
-    _ensure_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-
+    db_conn = db.connect()
     ua = _parse_user_agent(payload.get("userAgent"))
 
     try:
-        cursor = conn.execute(
+        cursor = db_conn.execute(
             """INSERT INTO runs (timestamp, asn, asn_org, country, browser_family,
                browser_major, os_family, browser_lang, total_resolvers, cors_count,
                opaque_count, dead_count, verified_dns_count, verified_auth_count,
                unverified_count, paradox_count, avg_cached_ms, avg_uncached_ms)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               RETURNING id;""",
             (
                 # Europe/Berlin timestamp with correct DST offset (+01:00 or +02:00)
                 datetime.now(ZoneInfo("Europe/Berlin")).isoformat(),
@@ -276,16 +186,19 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
                 avg_cached,
                 avg_uncached,
             ),
-        )
-        run_id = cursor.lastrowid
+        ).fetchone()
+        if cursor is not None:
+            run_id = cursor[0]
+        else:
+            raise Exception("Cannot get run_id")
 
         for r in resolver_data:
-            conn.execute(
+            db_conn.execute(
                 """INSERT INTO measurements (run_id, resolver_id, resolver_name,
                    resolver_url, cached_avg_ms, uncached_avg_ms, score_ms, cors,
                    dnssec, no_logs, no_filter, resolver_country, verification_status,
                    paradox, cached_times, uncached_times)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     run_id,
                     r.get("id", "unknown"),
@@ -307,54 +220,58 @@ def store_telemetry(payload: dict, request_headers: dict, client_host: str | Non
                 ),
             )
 
-        conn.commit()
+        db_conn.commit()
         logger.info("Stored run %s: %d resolvers, %d CORS-capable, %d verified-dns, %d verified-auth, %d paradox, geo=%s/%s",
                      run_id, total, cors_count, verified_dns_count, verified_auth_count, paradox_count, geo.get("country"), geo.get("asn_org"))
 
         return {"status": "ok", "run_id": run_id}
 
     except Exception:
-        conn.rollback()
+        db_conn.rollback()
         logger.exception("Failed to store telemetry data")
         raise
     finally:
-        conn.close()
+        db_conn.close()
 
 
-def get_stats() -> dict:
+def get_stats(db: PostgresDatabase) -> dict:
     """Return aggregate statistics for the dashboard/research."""
-    db_path = _get_db_path()
-    _ensure_db(db_path)
+    db_conn = db.connect()
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    total_runs = -1
+    total_measurements = -1
     try:
-        total_runs = conn.execute("SELECT COUNT(*) as c FROM runs").fetchone()["c"]
-        total_measurements = conn.execute("SELECT COUNT(*) as c FROM measurements").fetchone()["c"]
+        _total_runs_output = db_conn.execute("SELECT COUNT(*) AS c FROM runs;").fetchone()
+        if _total_runs_output is not None:
+            total_runs = _total_runs_output[0]
+
+        _total_measurements_output = db_conn.execute("SELECT COUNT(*) as c FROM measurements").fetchone()
+        if _total_measurements_output is not None:
+            total_measurements = _total_measurements_output[0]
 
         # Fastest resolvers (median score across all runs)
-        top = conn.execute(
-            """SELECT resolver_name, resolver_url, ROUND(AVG(score_ms),1) as avg_score,
-               COUNT(*) as runs, ROUND(AVG(cached_avg_ms),1) as avg_cached,
-               ROUND(AVG(uncached_avg_ms),1) as avg_uncached
-               FROM measurements WHERE score_ms IS NOT NULL
-               GROUP BY resolver_id HAVING runs >= 2
-               ORDER BY avg_score ASC LIMIT 10"""
-        ).fetchall()
-
+        top = db_conn.execute("""
+SELECT
+    resolver_name, resolver_url, ROUND(CAST(AVG(score_ms) as numeric),1) as avg_score,
+    COUNT(*) as runs, ROUND(CAST(AVG(cached_avg_ms) as numeric),1) as avg_cached,
+    ROUND(CAST(AVG(uncached_avg_ms) as numeric),1) as avg_uncached
+FROM measurements
+WHERE score_ms IS NOT NULL
+GROUP BY resolver_id, resolver_name, resolver_url
+ORDER BY avg_score ASC LIMIT 10
+""".strip()).fetchall()
         # CORS distribution
-        cors_stats = conn.execute(
+        cors_stats = db_conn.execute(
             "SELECT cors, COUNT(*) as c FROM measurements GROUP BY cors"
         ).fetchall()
-
         # Country distribution
-        country_stats = conn.execute(
+        country_stats = db_conn.execute(
             "SELECT country, COUNT(*) as runs FROM runs WHERE country IS NOT NULL GROUP BY country ORDER BY runs DESC LIMIT 10"
         ).fetchall()
 
         # Recent runs
-        recent = conn.execute(
-            "SELECT id, timestamp, country, asn_org, total_resolvers, cors_count, verified_dns_count, verified_auth_count, unverified_count, paradox_count, ROUND(avg_cached_ms,1) as avg_cached, ROUND(avg_uncached_ms,1) as avg_uncached FROM runs ORDER BY id DESC LIMIT 20"
+        recent = db_conn.execute(
+            "SELECT id, timestamp, country, asn_org, total_resolvers, cors_count, verified_dns_count, verified_auth_count, unverified_count, paradox_count, ROUND(CAST(avg_cached_ms as numeric),1) as avg_cached, ROUND(CAST(avg_uncached_ms as numeric),1) as avg_uncached FROM runs ORDER BY id DESC LIMIT 20"
         ).fetchall()
 
         return {
@@ -367,4 +284,4 @@ def get_stats() -> dict:
             "recent_runs": [dict(r) for r in recent],
         }
     finally:
-        conn.close()
+        db_conn.close()

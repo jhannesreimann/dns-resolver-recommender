@@ -25,15 +25,38 @@ pyproject.toml   Dependencies and packaging metadata
 
 ## Local development
 
+The easiest way to run the backend is to use the `uv` package manager.
+
+Sync the dependencies (needed only when first-time running):
+
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install -e .
+uv sync
+```
+
+The start the application with the necessary secrets:
+
+```bash
 export CLOUDFLARE_API_KEY=...
 export ZONE_ID=...
-python -m dnsrr        # serves on 127.0.0.1:8000
+uv run dnsrr        # serves on 127.0.0.1:8000
 ```
 
 Hit `curl -X POST http://127.0.0.1:8000/api/dns/rotate` to verify it works.
+
+### Local Database
+
+Using the production database is a bad idea, but you can use a local database for testing. Do the following:
+
+```bash
+podman pull postgres:18
+podman run --name local-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=postgres -p 5432:5432 -d postgres
+```
+
+You can also replace podman with docker, if you prefer that. This creates a local database running on port 5432. To verify it is running, use the following with password `postgres`:
+
+```bash
+psql -U postgres -h localhost -p 5432
+```
 
 ## Production
 
