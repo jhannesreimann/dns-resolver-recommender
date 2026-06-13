@@ -465,40 +465,55 @@ async function runMeasurements() {
         const allCors = allValid.filter(r => r.resolver.cors && r.statusText === "Success");
         const opaqueForVerification = allValid.filter(r => !r.resolver.cors || r.statusText !== "Success").slice(0, 10);
 
-        // ── Canary verification: try instant verification for ALL resolvers ──
+        // Canary verification with one retry
         // The canary fetch() was already fired in parallel with speed queries.
-        // Now we check our own bind9 log — no Cloudflare API, no polling delay.
+        // We check our own bind9 log. First pass catches most; a 2s retry catches
+        // the few where the log hadn't flushed yet.
         progress.innerHTML = `Measurements complete. <strong>🔍 Verifying via canary DNS log...</strong>`;
         const canaryVerified = new Set();
 
-        await Promise.all(allValid.map(async (res) => {
-            if (!res.canaryDomain) return;
-            try {
-                const vRes = await fetch(`${API_BASE}/dns/verify-canary?domain=${res.canaryDomain}`);
-                if (vRes.ok) {
-                    const data = await vRes.json();
-                    if (data.verified) {
-                        canaryVerified.add(res.resolver.id);
-                        const statusEl = document.getElementById(`status-${res.resolver.id}`);
-                        if (statusEl) {
-                            const label = res.resolver.cors ? "Verified (DNS + Canary)" : "Verified (Canary)";
-                            statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ ${label}</span> <br><small style="color: gray; font-size:10px;">(canary DNS log match)</small>`;
+        const tryCanary = async (resolvers) => {
+            const failed = [];
+            await Promise.all(resolvers.map(async (res) => {
+                if (!res.canaryDomain) return;
+                try {
+                    const vRes = await fetch(`${API_BASE}/dns/verify-canary?domain=${res.canaryDomain}`);
+                    if (vRes.ok) {
+                        const data = await vRes.json();
+                        if (data.verified) {
+                            canaryVerified.add(res.resolver.id);
+                            const statusEl = document.getElementById(`status-${res.resolver.id}`);
+                            if (statusEl) {
+                                const label = res.resolver.cors ? "Verified (DNS + Canary)" : "Verified (Canary)";
+                                statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ ${label}</span> <br><small style="color: gray; font-size:10px;">(canary DNS log match)</small>`;
+                            }
+                            return;
                         }
                     }
+                } catch (e) {
+                    console.error("Canary verification error for", res.resolver.name, e);
                 }
-            } catch (e) {
-                console.error("Canary verification error for", res.resolver.name, e);
-            }
-        }));
+                failed.push(res);
+            }));
+            return failed;
+        };
+
+        let canaryFailed = await tryCanary(allValid);
+
+        // Retry once after 2s for log flush delay
+        if (canaryFailed.length > 0) {
+            await new Promise(r => setTimeout(r, 2000));
+            canaryFailed = await tryCanary(canaryFailed);
+        }
 
         const canaryCount = canaryVerified.size;
         // CORS resolvers that passed canary are fully verified; CORS resolvers
-        // that didn't get canary verification still get the CORS badge.
+        // that still didn't get canary still get the CORS badge.
         const corsWithoutCanary = allCors.filter(r => !canaryVerified.has(r.resolver.id));
         corsWithoutCanary.forEach(res => {
             const statusEl = document.getElementById(`status-${res.resolver.id}`);
             if (statusEl) {
-                statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ Verified (DNS)</span> <br><small style="color: gray; font-size:10px;">(CORS response parsed; canary not yet in log)</small>`;
+                statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ Verified (DNS)</span> <br><small style="color: gray; font-size:10px;">(CORS response parsed)</small>`;
             }
         });
 
