@@ -565,7 +565,8 @@ async function runMeasurements() {
                     }
                 }));
 
-                const opaqueVerified = verifiedIds.size;
+                const opaqueAlreadyCanary = opaqueForVerification.length - opaqueStillUnverified.length;
+                const opaqueVerified = opaqueAlreadyCanary + verifiedIds.size;
                 progress.innerHTML = `Measurements complete. CORS: ${allCors.length} verified. <strong>Opaque: ${opaqueVerified}/${opaqueForVerification.length} verified</strong>`;
 
                 const stillRemaining = opaqueForVerification.filter(res => !verifiedIds.has(res.resolver.id));
