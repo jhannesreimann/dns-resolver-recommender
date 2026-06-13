@@ -602,6 +602,7 @@ async function runMeasurements() {
                     if (verificationEl) {
                         const html = verificationEl.innerHTML || "";
                         if (html.includes("Verified (DNS)")) verificationStatus = "verified_dns";
+                        else if (html.includes("Verified (Canary)")) verificationStatus = "verified_dns";
                         else if (html.includes("Verified (Auth)")) verificationStatus = "verified_auth";
                         else if (html.includes("Unverified")) verificationStatus = "unverified";
                         else verificationStatus = verificationEl.textContent?.trim() || "unknown";
