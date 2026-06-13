@@ -195,6 +195,7 @@ async function measureOneResolver(resolver) {
         }
 
         // 3. Uncached Measurement (5 queries to unique UUID subdomains, same sample size as cached)
+        //    + 1 parallel canary query to verify.diic-hpi.org (not scored, just for verification)
         const uncachedTimes = [];
         let uncachedStatus = "ok";
         const resolverDomains = [
@@ -204,6 +205,12 @@ async function measureOneResolver(resolver) {
             crypto.randomUUID() + ".diic-hpi.org",
             crypto.randomUUID() + ".diic-hpi.org"
         ];
+        // Canary: same first UUID but on our own authoritative DNS for log verification
+        const canaryUuid = resolverDomains[0].replace(".diic-hpi.org", "");
+        const canaryDomain = canaryUuid + ".verify.diic-hpi.org";
+        // Fire canary in parallel (fire-and-forget, not scored)
+        const canaryPromise = measure_resolver(resolver.url, canaryDomain, resolver.cors, MEASUREMENT_TIMEOUT_MS)
+            .catch(() => ({ status: "canary_error" }));
 
         for (let j = 0; j < 5; j++) {
             const domain = resolverDomains[j];
@@ -250,6 +257,7 @@ async function measureOneResolver(resolver) {
             status: score !== null ? "ok" : "fail",
             statusText: score !== null ? (resolver.cors ? "Success" : "Opaque (Unverified)") : uncachedStatus,
             domains: resolverDomains,
+            canaryDomain: canaryDomain,
             cachedTimes,
             uncachedTimes
         };
@@ -457,29 +465,60 @@ async function runMeasurements() {
         const allCors = allValid.filter(r => r.resolver.cors && r.statusText === "Success");
         const opaqueForVerification = allValid.filter(r => !r.resolver.cors || r.statusText !== "Success").slice(0, 10);
 
-        // Auto-verify ALL CORS resolvers immediately (regardless of rank)
-        allCors.forEach(res => {
+        // ── Canary verification: try instant verification for ALL resolvers ──
+        // The canary fetch() was already fired in parallel with speed queries.
+        // Now we check our own bind9 log — no Cloudflare API, no polling delay.
+        progress.innerHTML = `Measurements complete. <strong>🔍 Verifying via canary DNS log...</strong>`;
+        const canaryVerified = new Set();
+
+        await Promise.all(allValid.map(async (res) => {
+            if (!res.canaryDomain) return;
+            try {
+                const vRes = await fetch(`${API_BASE}/dns/verify-canary?domain=${res.canaryDomain}`);
+                if (vRes.ok) {
+                    const data = await vRes.json();
+                    if (data.verified) {
+                        canaryVerified.add(res.resolver.id);
+                        const statusEl = document.getElementById(`status-${res.resolver.id}`);
+                        if (statusEl) {
+                            const label = res.resolver.cors ? "Verified (DNS + Canary)" : "Verified (Canary)";
+                            statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ ${label}</span> <br><small style="color: gray; font-size:10px;">(canary DNS log match)</small>`;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("Canary verification error for", res.resolver.name, e);
+            }
+        }));
+
+        const canaryCount = canaryVerified.size;
+        // CORS resolvers that passed canary are fully verified; CORS resolvers
+        // that didn't get canary verification still get the CORS badge.
+        const corsWithoutCanary = allCors.filter(r => !canaryVerified.has(r.resolver.id));
+        corsWithoutCanary.forEach(res => {
             const statusEl = document.getElementById(`status-${res.resolver.id}`);
             if (statusEl) {
-                statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ Verified (DNS)</span> <br><small style="color: gray; font-size:10px;">(CORS response parsed)</small>`;
+                statusEl.innerHTML = `<span style="color: #27ae60; font-weight: bold;">✅ Verified (DNS)</span> <br><small style="color: gray; font-size:10px;">(CORS response parsed; canary not yet in log)</small>`;
             }
         });
 
-        if (opaqueForVerification.length > 0) {
-            const corsCount = allCors.length;
-            progress.innerHTML = `Measurements complete. CORS: ${corsCount} auto-verified. <strong>🔍 Verifying top ${opaqueForVerification.length} opaque resolvers...</strong>`;
+        // Opaque resolvers not verified by canary: fall back to Cloudflare polling
+        const opaqueStillUnverified = opaqueForVerification.filter(r => !canaryVerified.has(r.resolver.id));
 
-            opaqueForVerification.forEach(res => {
+        if (opaqueStillUnverified.length > 0) {
+            progress.innerHTML = `Measurements complete. Canary: ${canaryCount} verified. <strong>🔍 Polling ${opaqueStillUnverified.length} opaque resolvers via Cloudflare...</strong>`;
+
+            opaqueStillUnverified.forEach(res => {
                 const statusEl = document.getElementById(`status-${res.resolver.id}`);
                 if (statusEl) {
-                    statusEl.innerHTML = `<span style="color: #d35400;">Verifying... 🔍</span> <br><small style="color: gray; font-size:10px;">(No-CORS)</small>`;
+                    statusEl.innerHTML = `<span style="color: #d35400;">Verifying... 🔍</span> <br><small style="color: gray; font-size:10px;">(No-CORS, canary pending)</small>`;
                 }
             });
 
             // Verification polling with exponential backoff for opaque resolvers only
-            const INITIAL_DELAY_MS = 10000;  // first poll delayed 10s
-            const MAX_TOTAL_MS = 90000;       // 90s total budget
-            const BACKOFF_SECS = [0, 8, 16, 32]; // intervals between successive polls
+            const INITIAL_DELAY_MS = 10000;
+            const MAX_TOTAL_MS = 90000;
+            const BACKOFF_SECS = [0, 8, 16, 32];
             const verifiedIds = new Set();
             let pollIdx = 0;
             const startTs = Date.now();
@@ -487,7 +526,7 @@ async function runMeasurements() {
             await new Promise(r => setTimeout(r, INITIAL_DELAY_MS));
 
             while (true) {
-                const remaining = opaqueForVerification.filter(res => !verifiedIds.has(res.resolver.id));
+                const remaining = opaqueStillUnverified.filter(res => !verifiedIds.has(res.resolver.id));
                 if (remaining.length === 0) break;
                 if (Date.now() - startTs >= MAX_TOTAL_MS) break;
 
@@ -525,8 +564,8 @@ async function runMeasurements() {
 
             progress.innerHTML = `Measurements complete. <strong>Verification finished!</strong>`;
 
-            // Mark opaque resolvers that failed verification
-            opaqueForVerification.filter(res => !verifiedIds.has(res.resolver.id)).forEach(res => {
+            // Mark opaque resolvers that failed both canary and Cloudflare verification
+            opaqueStillUnverified.filter(res => !verifiedIds.has(res.resolver.id)).forEach(res => {
                 const statusEl = document.getElementById(`status-${res.resolver.id}`);
                 if (statusEl) {
                     statusEl.innerHTML = `<span style="color: #c0392b; font-weight: bold;">❌ Unverified</span> <br><small style="color: gray; font-size:10px;">(No-CORS, not in authoritative logs)</small>`;

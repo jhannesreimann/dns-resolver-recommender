@@ -233,6 +233,51 @@ def create_app() -> FastAPI:
                 detail=str(exc),
             ) from exc
 
+    @app.get("/api/dns/verify-canary", response_model=VerifyResponse)
+    async def verify_canary(domain: str) -> VerifyResponse:
+        """Check the local bind9 query log for the canary subdomain.
+
+        The frontend fires a parallel fetch() to <uuid>.verify.diic-hpi.org
+        alongside the speed queries. Our bind9 authoritative server logs every
+        query. If the UUID appears in the log, the resolver performed real
+        recursive DNS work -- no Cloudflare API needed.
+        """
+        CANARY_LOG = "/var/log/named/query.log"
+        import re
+        try:
+            with open(CANARY_LOG, "r") as f:
+                for line in f:
+                    if domain in line and "query:" in line:
+                        return VerifyResponse(
+                            status="ok",
+                            verified=True,
+                            query_count=1,
+                        )
+            return VerifyResponse(
+                status="ok",
+                verified=False,
+                query_count=0,
+            )
+        except FileNotFoundError:
+            return VerifyResponse(
+                status="error",
+                verified=False,
+                message="Canary log file not found -- is bind9 query logging enabled?",
+            )
+        except PermissionError:
+            return VerifyResponse(
+                status="error",
+                verified=False,
+                message="Cannot read canary log -- permission denied.",
+            )
+        except Exception:
+            logger.exception("Canary verification failed")
+            return VerifyResponse(
+                status="error",
+                verified=False,
+                message="Canary verification failed unexpectedly.",
+            )
+
     class TelemetryPayload(BaseModel):
         resolvers: list[dict]
         userAgent: str | None = None
