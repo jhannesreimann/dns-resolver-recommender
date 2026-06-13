@@ -565,9 +565,11 @@ async function runMeasurements() {
                     }
                 }));
 
-                const opaqueAlreadyCanary = opaqueForVerification.length - opaqueStillUnverified.length;
-                const opaqueVerified = opaqueAlreadyCanary + verifiedIds.size;
-                progress.innerHTML = `Measurements complete. CORS: ${allCors.length} verified. <strong>Opaque: ${opaqueVerified}/${opaqueForVerification.length} verified</strong>`;
+                // Count all already-verified: CORS auto + canary + Cloudflare
+                const alreadyDone = opaqueForVerification.filter(r =>
+                    canaryVerified.has(r.resolver.id) || verifiedIds.has(r.resolver.id)
+                ).length;
+                progress.innerHTML = `Measurements complete. CORS: ${allCors.length} verified. <strong>Opaque: ${alreadyDone}/${opaqueForVerification.length} verified</strong>`;
 
                 const stillRemaining = opaqueForVerification.filter(res => !verifiedIds.has(res.resolver.id));
                 if (stillRemaining.length === 0) break;
