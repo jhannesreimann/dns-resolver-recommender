@@ -245,6 +245,12 @@ def store_telemetry(db: PostgresDatabase, payload: dict, request_headers: dict,
         db_conn.close()
 
 
+def _rows_to_dicts(cursor) -> list[dict]:
+    """Convert a psycopg cursor's results to a list of dicts keyed by column name."""
+    cols = [desc[0] for desc in cursor.description] if cursor.description else []
+    return [dict(zip(cols, row)) for row in cursor]
+
+
 def get_stats(db: PostgresDatabase) -> dict:
     """Return aggregate statistics for the dashboard/research."""
     db_conn = db.connect()
@@ -261,7 +267,7 @@ def get_stats(db: PostgresDatabase) -> dict:
             total_measurements = _total_measurements_output[0]
 
         # Fastest resolvers (median score across all runs)
-        top = db_conn.execute("""
+        top_cur = db_conn.execute("""
 SELECT
     resolver_name, resolver_url, ROUND(CAST(AVG(score_ms) as numeric),1) as avg_score,
     COUNT(*) as runs, ROUND(CAST(AVG(cached_avg_ms) as numeric),1) as avg_cached,
@@ -270,29 +276,35 @@ FROM measurements
 WHERE score_ms IS NOT NULL
 GROUP BY resolver_id, resolver_name, resolver_url
 ORDER BY avg_score ASC LIMIT 10
-""".strip()).fetchall()
+""".strip())
+        top = _rows_to_dicts(top_cur)
+
         # CORS distribution
-        cors_stats = db_conn.execute(
+        cors_cur = db_conn.execute(
             "SELECT cors, COUNT(*) as c FROM measurements GROUP BY cors"
-        ).fetchall()
+        )
+        cors_stats = _rows_to_dicts(cors_cur)
+
         # Country distribution
-        country_stats = db_conn.execute(
+        country_cur = db_conn.execute(
             "SELECT country, COUNT(*) as runs FROM runs WHERE country IS NOT NULL GROUP BY country ORDER BY runs DESC LIMIT 10"
-        ).fetchall()
+        )
+        country_stats = _rows_to_dicts(country_cur)
 
         # Recent runs
-        recent = db_conn.execute(
+        recent_cur = db_conn.execute(
             "SELECT id, timestamp, country, asn_org, total_resolvers, cors_count, verified_dns_count, verified_auth_count, unverified_count, paradox_count, ROUND(CAST(avg_cached_ms as numeric),1) as avg_cached, ROUND(CAST(avg_uncached_ms as numeric),1) as avg_uncached, client_http_version, client_ip_version FROM runs ORDER BY id DESC LIMIT 20"
-        ).fetchall()
+        )
+        recent = _rows_to_dicts(recent_cur)
 
         return {
             "status": "ok",
             "total_runs": total_runs,
             "total_measurements": total_measurements,
-            "top_resolvers": [dict(r) for r in top],
-            "cors_distribution": [dict(r) for r in cors_stats],
-            "country_distribution": [dict(r) for r in country_stats],
-            "recent_runs": [dict(r) for r in recent],
+            "top_resolvers": top,
+            "cors_distribution": cors_stats,
+            "country_distribution": country_stats,
+            "recent_runs": recent,
         }
     finally:
         db_conn.close()
