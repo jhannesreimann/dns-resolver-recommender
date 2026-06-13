@@ -463,7 +463,7 @@ async function runMeasurements() {
         // cheating. We limit GraphQL polling to top 10 opaque resolvers to protect API rate limits.
         const allValid = sortedResults.filter(r => r.score !== null);
         const allCors = allValid.filter(r => r.resolver.cors && r.statusText === "Success");
-        const opaqueForVerification = allValid.filter(r => !r.resolver.cors || r.statusText !== "Success").slice(0, 10);
+        const opaqueForVerification = allValid.filter(r => !r.resolver.cors).slice(0, 10);
 
         // Canary verification with one retry
         // The canary fetch() was already fired in parallel with speed queries.
@@ -565,10 +565,7 @@ async function runMeasurements() {
                     }
                 }));
 
-                // Count all already-verified: CORS auto + canary + Cloudflare
-                const alreadyDone = opaqueForVerification.filter(r =>
-                    canaryVerified.has(r.resolver.id) || verifiedIds.has(r.resolver.id)
-                ).length;
+                const alreadyDone = verifiedIds.size + (opaqueForVerification.length - opaqueStillUnverified.length);
                 progress.innerHTML = `Measurements complete. CORS: ${allCors.length} verified. <strong>Opaque: ${alreadyDone}/${opaqueForVerification.length} verified</strong>`;
 
                 const stillRemaining = opaqueForVerification.filter(res => !verifiedIds.has(res.resolver.id));
