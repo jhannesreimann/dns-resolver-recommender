@@ -18,18 +18,28 @@ variables:
 
 deploy-frontend:
   stage: deploy
+  # Node image so we can build the Vite app. It is Debian-based, so the shared
+  # ssh_setup (which apt-get installs openssh-client) works unchanged.
+  image: node:22-bookworm
   <<: *ssh_setup
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes:
         - src/frontend/**/*
-        - src/wasm/**/*
   script:
-    # 1. We don't have rust/wasm-pack easily on the GitLab runner, so we copy the files
-    # to /tmp/ on the VM first, exactly like the manual deploy.
-    - scp -r src/frontend src/wasm/pkg $VM_USER@$VM_HOST:/tmp/
-    # 2. Run the copy commands on the VM using passwordless sudo
-    - ssh $VM_USER@$VM_HOST "sudo cp -r /tmp/frontend/* /var/www/dnsrr/ && sudo cp -r /tmp/pkg/* /var/www/dnsrr/wasm/pkg/ && sudo chown -R www-data:www-data /var/www/dnsrr"
+    # 1. Build the static bundle. The Rust->WASM engine is vendored into
+    #    src/frontend/src/wasm, so no Rust toolchain is needed on the runner.
+    - cd src/frontend
+    - npm ci
+    - npm run build
+    - cd ../..
+    # 2. Upload the build to a temp dir on the VM.
+    - ssh $VM_USER@$VM_HOST "rm -rf /tmp/dnsrr-dist && mkdir -p /tmp/dnsrr-dist"
+    - scp -r src/frontend/dist/. $VM_USER@$VM_HOST:/tmp/dnsrr-dist/
+    # 3. Atomically replace the webroot contents via passwordless sudo. The build
+    #    is fully self-contained (hashed assets + bundled wasm), so the old
+    #    webroot (including the legacy wasm/pkg dir) is wiped first.
+    - ssh $VM_USER@$VM_HOST "sudo find /var/www/dnsrr -mindepth 1 -delete && sudo cp -r /tmp/dnsrr-dist/. /var/www/dnsrr/ && sudo chown -R www-data:www-data /var/www/dnsrr"
 
 deploy-backend:
   stage: deploy

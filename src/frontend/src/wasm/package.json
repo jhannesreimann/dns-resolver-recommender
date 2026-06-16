@@ -1,0 +1,19 @@
+{
+  "name": "dns-resolver-recommender",
+  "type": "module",
+  "collaborators": [
+    "Jhannes Reimann <jhannes.reimann@student.hpi.uni-potsdam.de>",
+    "Robert Richter <robert.richter@hpi.de"
+  ],
+  "version": "0.1.0",
+  "files": [
+    "dns_resolver_recommender_bg.wasm",
+    "dns_resolver_recommender.js",
+    "dns_resolver_recommender.d.ts"
+  ],
+  "main": "dns_resolver_recommender.js",
+  "types": "dns_resolver_recommender.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

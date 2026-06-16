@@ -1,0 +1,132 @@
+@import "tailwindcss";
+@plugin "tailwindcss-motion";
+
+@plugin "daisyui" {
+  themes: dnsrrlight --default, dnsrrdark --prefersdark;
+  logs: false;
+}
+
+/* Light theme tuned to the HPI brand palette */
+@plugin "daisyui/theme" {
+  name: "dnsrrlight";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-base-100: #ffffff;
+  --color-base-200: #f4f6f8;
+  --color-base-300: #e3e8ef;
+  --color-base-content: #1c1f23;
+
+  --color-primary: #7664a0;
+  --color-primary-content: #ffffff;
+  --color-secondary: #dd6108;
+  --color-secondary-content: #ffffff;
+  --color-accent: #007a9e;
+  --color-accent-content: #ffffff;
+  --color-neutral: #212427;
+  --color-neutral-content: #ffffff;
+
+  --color-info: #007a9e;
+  --color-info-content: #ffffff;
+  --color-success: #007f6f;
+  --color-success-content: #ffffff;
+  --color-warning: #b5680a;
+  --color-warning-content: #ffffff;
+  --color-error: #b1063a;
+  --color-error-content: #ffffff;
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.625rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* Dark theme: slightly lifted brand hues for contrast on dark surfaces */
+@plugin "daisyui/theme" {
+  name: "dnsrrdark";
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: #1c2128;
+  --color-base-200: #14171c;
+  --color-base-300: #2a313b;
+  --color-base-content: #dde2e8;
+
+  --color-primary: #9d8bce;
+  --color-primary-content: #16121f;
+  --color-secondary: #ff8a3d;
+  --color-secondary-content: #1f1106;
+  --color-accent: #34b6d6;
+  --color-accent-content: #04161c;
+  --color-neutral: #2a313b;
+  --color-neutral-content: #dde2e8;
+
+  --color-info: #38bdf8;
+  --color-info-content: #04161c;
+  --color-success: #18e797;
+  --color-success-content: #04241a;
+  --color-warning: #f6a800;
+  --color-warning-content: #241a00;
+  --color-error: #fb6f84;
+  --color-error-content: #2a0410;
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.625rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@theme {
+  --color-hpi-red: #b1063a;
+  --color-hpi-orange: #dd6108;
+  --color-hpi-yellow: #f6a800;
+  --color-hpi-gray: #5a6065;
+  --color-hpi-violet: #7664a0;
+  --color-hpi-blue: #007a9e;
+  --color-hpi-lightgreen: #779a0b;
+  --color-hpi-darkgreen: #007f6f;
+  --color-hpi-mint: #18e797;
+
+  --font-sans: 'Inter', 'Verdana', sans-serif;
+  --font-mono: 'DejaVu Sans Mono', ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Themed, slim scrollbars so dark mode doesn't show a bright track */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-base-300) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-base-300);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

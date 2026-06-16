@@ -58,6 +58,26 @@ Assumes the base packages (`nginx`, `python3`, `python3-venv`, `certbot`,
        --agree-tos -m jhannes.reimann@student.hpi.uni-potsdam.de --no-eff-email
    ```
 
+## Frontend webroot
+
+Nginx serves the static frontend from `/var/www/dnsrr/` (root in the vhost). The
+GitLab CI `deploy-frontend` job builds `src/frontend` with Node and copies the
+self-contained `dist/` into that directory, so nothing needs to be built on the
+VM. The bundle includes the WASM engine as a hashed asset, so the legacy
+`/var/www/dnsrr/wasm/pkg/` directory is no longer used.
+
+To deploy the frontend manually instead of via CI:
+
+```bash
+cd src/frontend && npm ci && npm run build && cd ../..
+ssh $VM_USER@dns.diic-hpi.org "rm -rf /tmp/dnsrr-dist && mkdir -p /tmp/dnsrr-dist"
+scp -r src/frontend/dist/. $VM_USER@dns.diic-hpi.org:/tmp/dnsrr-dist/
+ssh $VM_USER@dns.diic-hpi.org \
+  "sudo find /var/www/dnsrr -mindepth 1 -delete \
+   && sudo cp -r /tmp/dnsrr-dist/. /var/www/dnsrr/ \
+   && sudo chown -R www-data:www-data /var/www/dnsrr"
+```
+
 ## Smoke test
 
 ```bash
