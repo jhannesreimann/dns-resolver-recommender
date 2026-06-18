@@ -29,7 +29,7 @@ export const WEIGHT_LABELS = {
 
 export const WEIGHT_HINTS = {
   speed: 'Lower weighted latency (80% cached, 20% uncached)',
-  consistency: 'Stable, spike-free latency that only counts among already-fast resolvers',
+  consistency: 'Stable, spike-free latency — only counts among already-fast resolvers',
   dnssec: 'Cryptographically validates DNS answers',
   privacy: 'Operator advertises a no-logging policy',
   unfiltered: 'Resolves every domain, no ad/content blocking',
@@ -134,8 +134,13 @@ export function computeScores(results, weights, preferredCountry) {
     const dnssec = r.resolver.dnssec ? 1 : 0;
     const privacy = r.resolver.noLogs ? 1 : 0;
     const unfiltered = r.resolver.noFilter ? 1 : 0;
-    const country =
-      preferredCountry && r.resolver.country === preferredCountry ? 1 : 0;
+    let country = 0;
+    if (preferredCountry && r.resolver.country) {
+      const c = r.resolver.country;
+      if (c === 'Global' || c.split(',').includes(preferredCountry)) {
+        country = 1;
+      }
+    }
 
     const dimensions = { speed, consistency, dnssec, privacy, unfiltered, country };
 

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { SlidersHorizontal, RotateCcw, MapPin, ChevronDown } from 'lucide-react';
+import { SlidersHorizontal, RotateCcw, MapPin, ChevronDown, Globe } from 'lucide-react';
 import {
   WEIGHT_LABELS,
   WEIGHT_HINTS,
@@ -64,15 +64,25 @@ export default function FilterPanel({
 }) {
   const countries = useMemo(() => {
     const seen = new Set();
-    return (resolvers || [])
-      .map((r) => r.country)
-      .filter((c) => {
-        if (!c || seen.has(c)) return false;
-        seen.add(c);
-        return true;
-      })
-      .sort();
+    const list = [];
+    for (const r of resolvers || []) {
+      const c = r.country;
+      if (!c || c === 'Global') continue; // Global is handled separately
+      for (const part of c.split(',')) {
+        const code = part.trim();
+        if (code && !seen.has(code)) {
+          seen.add(code);
+          list.push(code);
+        }
+      }
+    }
+    return list.sort();
   }, [resolvers]);
+
+  const hasGlobal = useMemo(
+    () => (resolvers || []).some((r) => r.country === 'Global'),
+    [resolvers]
+  );
 
   const sliderKeys = preferredCountry ? [...PRIORITY_KEYS, 'countryMatch'] : PRIORITY_KEYS;
 
@@ -124,7 +134,7 @@ export default function FilterPanel({
           <SlidersHorizontal size={15} className="text-primary" />
           <span className="text-sm font-semibold text-base-content">Ranking priorities</span>
           <span className="text-xs text-base-content/50">
-            relative importance: raising one lowers the others
+            relative importance &mdash; raising one lowers the others
           </span>
           <button
             type="button"
@@ -221,6 +231,18 @@ export default function FilterPanel({
                     Any country
                   </button>
                 </li>
+                {hasGlobal && (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => pickCountry('Global')}
+                      className={preferredCountry === 'Global' ? 'active' : ''}
+                    >
+                      <Globe size={14} />
+                      Global anycast
+                    </button>
+                  </li>
+                )}
                 {countries.map((c) => (
                   <li key={c}>
                     <button
