@@ -50,14 +50,17 @@ export default function RecommendationCard({ top }) {
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <h2 className="text-2xl font-bold text-base-content">{r.name}</h2>
-          {r.country && r.country !== 'Global' && r.country.split(',').map((c) => (
-            <img key={c}
-              src={`https://flagcdn.com/24x18/${c.trim().toLowerCase()}.png`}
-              alt={c.trim()}
-              className="h-3.5 w-5 rounded-sm object-cover"
-            />
-          ))}
-          {r.country === 'Global' && <Globe size={15} className="text-info" />}
+          <span className={`${r.country_source ? 'tooltip tooltip-bottom' : ''} inline-flex items-center gap-1`}
+            data-tip={r.country_source || ''}>
+            {r.country && r.country !== 'Global' && r.country.split(',').map((c) => (
+              <img key={c}
+                src={`https://flagcdn.com/24x18/${c.trim().toLowerCase()}.png`}
+                alt={c.trim()}
+                className="h-3.5 w-5 rounded-sm object-cover"
+              />
+            ))}
+            {r.country === 'Global' && <Globe size={15} className="text-info" />}
+          </span>
         </div>
 
         <FeatureList resolver={r} />

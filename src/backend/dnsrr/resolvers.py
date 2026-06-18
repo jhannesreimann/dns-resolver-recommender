@@ -213,17 +213,25 @@ def parse_resolvers_markdown(content: str) -> list[dict[str, Any]]:
                 
                 # Country assignment: anycast tag > GeoLite2 on stamp IP > description fallback
                 country = None
+                country_source = None
                 anycast_tag = _tag_anycast(current_name)
                 if anycast_tag:
                     country = anycast_tag
+                    if ',' in anycast_tag:
+                        country_source = 'Regional anycast'
+                    else:
+                        country_source = 'Global anycast'
                 else:
-                    country = _geoip_country(stamp_info["ip_address"])
-                    if not country:
-                        # Fall back to description scraping for edge cases
+                    ip = stamp_info["ip_address"]
+                    country = _geoip_country(ip)
+                    if country:
+                        country_source = f'GeoLite2 on IP {ip}'
+                    else:
                         country_match = re.search(r"\b([A-Z]{2})\b", description)
                         if country_match:
                             country = country_match.group(1)
-                
+                            country_source = f'Description pattern match'
+
                 resolvers.append({
                     "id": current_name,
                     "name": current_name,
@@ -234,6 +242,7 @@ def parse_resolvers_markdown(content: str) -> list[dict[str, Any]]:
                     "no_logs": stamp_info["no_logs"],
                     "no_filter": stamp_info["no_filter"],
                     "country": country,
+                    "country_source": country_source,
                 })
             
             # Reset after saving
@@ -295,7 +304,8 @@ async def get_resolvers(force_refresh: bool = False) -> list[dict[str, Any]]:
             "dnssec": True,
             "no_logs": True,
             "no_filter": True,
-            "country": "US",
+            "country": "Global",
+            "country_source": "Global anycast (fallback)",
         },
         {
             "id": "google",
@@ -306,6 +316,7 @@ async def get_resolvers(force_refresh: bool = False) -> list[dict[str, Any]]:
             "dnssec": True,
             "no_logs": False,
             "no_filter": True,
-            "country": "US",
+            "country": "Global",
+            "country_source": "Global anycast (fallback)",
         },
     ]
