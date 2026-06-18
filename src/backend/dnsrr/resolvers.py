@@ -66,8 +66,16 @@ def _tag_anycast(name: str) -> str | None:
     anycast provider, or None otherwise."""
     name_lower = name.lower()
     for pattern, tag in ANYCAST_TAGS.items():
-        if pattern in name_lower:
-            return tag
+        # Match at word boundary or at start of name, to avoid false
+        # positives like "he" matching "cipherdns".
+        idx = name_lower.find(pattern)
+        if idx == -1:
+            continue
+        # Check that the match is at a word boundary: either at position 0
+        # or preceded by a non-alphanumeric character.
+        if idx > 0 and name_lower[idx - 1].isalnum():
+            continue
+        return tag
     return None
 
 # URL of the official DNSCrypt public resolvers list
