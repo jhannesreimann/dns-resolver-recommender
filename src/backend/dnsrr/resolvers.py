@@ -1,11 +1,74 @@
 import base64
+import ipaddress
 import logging
+import os
 import re
 import time
 from typing import Any
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Anycast / global DNS providers. Key = lowercased resolver name substring to
+# match against. Value = country tag. "Global" means the resolver serves all
+# countries and should match any country filter. Regional anycast uses
+# comma-separated ISO 3166-1 alpha-2 codes for the regions they serve.
+ANYCAST_TAGS: dict[str, str] = {
+    # Global anycast — serve everywhere
+    "cloudflare": "Global",
+    "google": "Global",
+    "quad9": "Global",
+    "nextdns": "Global",
+    "adguard": "Global",
+    "controld": "Global",
+    "cleanbrowsing": "Global",
+    "doh-cleanbrowsing": "Global",
+    "dns.sb": "Global",
+    "cisco": "Global",
+    "opendns": "Global",
+    "mullvad": "Global",
+    "he": "Global",
+    # Regional anycast
+    "yandex": "RU,BY,KZ",
+    "alidns": "CN,HK",
+    "dnspod": "CN,HK",
+    "cira": "CA",
+    "iij": "JP",
+    "nic.cz": "CZ",
+    "restena": "LU",
+    "switch": "CH",
+}
+
+def _geoip_country(ip_str: str) -> str | None:
+    """Look up an IP address in the local GeoLite2-Country database.
+    Returns the ISO country code or None."""
+    if not ip_str:
+        return None
+    try:
+        import geoip2.database
+    except ImportError:
+        return None
+    db_path = os.environ.get(
+        "GEOLITE2_COUNTRY_DB", "/var/lib/GeoIP/GeoLite2-Country.mmdb"
+    )
+    if not os.path.isfile(db_path):
+        return None
+    try:
+        addr = ip_str.strip("[]")
+        ip = ipaddress.ip_address(addr)
+        with geoip2.database.Reader(db_path) as reader:
+            return reader.country(ip).country.iso_code
+    except Exception:
+        return None
+
+def _tag_anycast(name: str) -> str | None:
+    """Return the anycast country tag if this resolver name matches a known
+    anycast provider, or None otherwise."""
+    name_lower = name.lower()
+    for pattern, tag in ANYCAST_TAGS.items():
+        if pattern in name_lower:
+            return tag
+    return None
 
 # URL of the official DNSCrypt public resolvers list
 RESOLVERS_LIST_URL = "https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/public-resolvers.md"
@@ -140,33 +203,18 @@ def parse_resolvers_markdown(content: str) -> list[dict[str, Any]]:
                 # Clean up multiple whitespaces
                 description = " ".join(description.split())
                 
-                # Derive country/location code if mentioned in the description (e.g., "[DE]", "Germany", "CH")
+                # Country assignment: anycast tag > GeoLite2 on stamp IP > description fallback
                 country = None
-                # Check for country flags or brackets in description
-                # E.g., "in Germany", "Switzerland", "Munich, Germany"
-                country_match = re.search(r"\b([A-Z]{2})\b", description)
-                if country_match:
-                    country = country_match.group(1)
-                elif "Germany" in description or "DE" in description or "Deutschland" in description:
-                    country = "DE"
-                elif "Switzerland" in description or "CH" in description or "Schweiz" in description:
-                    country = "CH"
-                elif "Austria" in description or "AT" in description or "Österreich" in description:
-                    country = "AT"
-                elif "United States" in description or "US" in description or "USA" in description:
-                    country = "US"
-                elif "Netherlands" in description or "NL" in description:
-                    country = "NL"
-                elif "France" in description or "FR" in description:
-                    country = "FR"
-                elif "Finland" in description or "FI" in description:
-                    country = "FI"
-                elif "Singapore" in description or "SG" in description:
-                    country = "SG"
-                elif "Japan" in description or "JP" in description:
-                    country = "JP"
-                elif "Canada" in description or "CA" in description:
-                    country = "CA"
+                anycast_tag = _tag_anycast(current_name)
+                if anycast_tag:
+                    country = anycast_tag
+                else:
+                    country = _geoip_country(stamp_info["ip_address"])
+                    if not country:
+                        # Fall back to description scraping for edge cases
+                        country_match = re.search(r"\b([A-Z]{2})\b", description)
+                        if country_match:
+                            country = country_match.group(1)
                 
                 resolvers.append({
                     "id": current_name,
