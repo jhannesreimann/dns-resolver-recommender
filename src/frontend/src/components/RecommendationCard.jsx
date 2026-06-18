@@ -50,8 +50,8 @@ export default function RecommendationCard({ top }) {
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <h2 className="text-2xl font-bold text-base-content">{r.name}</h2>
-          <span className={`${r.country_source ? 'tooltip tooltip-bottom' : ''} inline-flex items-center gap-1`}
-            data-tip={r.country_source || ''}>
+          <span className="tooltip tooltip-bottom inline-flex items-center gap-1"
+            data-tip={r.country_source || r.country || ''}>
             {r.country && r.country !== 'Global' && r.country.split(',').map((c) => (
               <img key={c}
                 src={`https://flagcdn.com/24x18/${c.trim().toLowerCase()}.png`}
