@@ -137,8 +137,10 @@ export function computeScores(results, weights, preferredCountry) {
     let country = 0;
     if (preferredCountry && r.resolver.country) {
       const c = r.resolver.country;
-      if (c === 'Global' || c.split(',').includes(preferredCountry)) {
+      if (c.split(',').includes(preferredCountry)) {
         country = 1;
+      } else if (c === 'Global') {
+        country = 0.5;
       }
     }
 
