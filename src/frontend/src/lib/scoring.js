@@ -29,7 +29,7 @@ export const WEIGHT_LABELS = {
 
 export const WEIGHT_HINTS = {
   speed: 'Lower weighted latency (80% cached, 20% uncached)',
-  consistency: 'Stable, spike-free latency — only counts among already-fast resolvers',
+  consistency: 'Stable, spike-free latency. Only counts among already-fast resolvers',
   dnssec: 'Cryptographically validates DNS answers',
   privacy: 'Operator advertises a no-logging policy',
   unfiltered: 'Resolves every domain, no ad/content blocking',

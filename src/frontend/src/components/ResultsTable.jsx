@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, Table2, AlertTriangle } from 'lucide-react';
+import { ChevronDown, Table2, AlertTriangle, Globe } from 'lucide-react';
 import { FeatureBadges, VerificationBadge, CopyButton } from './ResolverBadges';
 
 function SampleChips({ samples }) {
@@ -47,14 +47,15 @@ function ExpandRow({ result }) {
           <div className="flex items-center gap-2 text-xs">
             <span className="w-16 shrink-0 text-base-content/50">Country</span>
             <span className="flex items-center gap-1.5 text-base-content/80">
-              {r.country && (
-                <img
-                  src={`https://flagcdn.com/24x18/${r.country.toLowerCase()}.png`}
+              {r.country && r.country !== 'Global' && r.country.split(',').map((c) => (
+                <img key={c}
+                  src={`https://flagcdn.com/24x18/${c.trim().toLowerCase()}.png`}
                   alt=""
                   className="h-3 w-4 rounded-sm object-cover"
                 />
-              )}
-              {r.country || '--'}
+              ))}
+              {r.country === 'Global' && <Globe size={13} className="text-info" />}
+              <span>{r.country ? r.country.replace(/,/g, ', ') : '--'}</span>
             </span>
           </div>
           <p className="pt-1 text-[11px] leading-relaxed text-base-content/45">
@@ -127,12 +128,16 @@ function Row({ result, rank }) {
             <span className="truncate text-sm font-medium text-base-content max-w-[120px] sm:max-w-[200px]">
               {result.resolver.name}
             </span>
-            {result.resolver.country && (
-              <img
-                src={`https://flagcdn.com/24x18/${result.resolver.country.toLowerCase()}.png`}
-                alt=""
-                className="hidden h-2.5 w-3.5 rounded-sm object-cover sm:inline-block"
-              />
+            {result.resolver.country && result.resolver.country !== 'Global' &&
+              result.resolver.country.split(',').map((c) => (
+                <img key={c}
+                  src={`https://flagcdn.com/24x18/${c.trim().toLowerCase()}.png`}
+                  alt=""
+                  className="hidden h-2.5 w-3.5 rounded-sm object-cover sm:inline-block"
+                />
+              ))}
+            {result.resolver.country === 'Global' && (
+              <Globe size={12} className="hidden sm:inline-block text-info" />
             )}
           </div>
         </td>

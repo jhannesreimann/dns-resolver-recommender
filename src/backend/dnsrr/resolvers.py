@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # countries and should match any country filter. Regional anycast uses
 # comma-separated ISO 3166-1 alpha-2 codes for the regions they serve.
 ANYCAST_TAGS: dict[str, str] = {
-    # Global anycast — serve everywhere
+    # Global anycast: serve everywhere
     "cloudflare": "Global",
     "google": "Global",
     "quad9": "Global",

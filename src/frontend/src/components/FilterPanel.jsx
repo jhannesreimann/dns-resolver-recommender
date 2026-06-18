@@ -134,7 +134,7 @@ export default function FilterPanel({
           <SlidersHorizontal size={15} className="text-primary" />
           <span className="text-sm font-semibold text-base-content">Ranking priorities</span>
           <span className="text-xs text-base-content/50">
-            relative importance &mdash; raising one lowers the others
+            relative importance: raising one lowers the others
           </span>
           <button
             type="button"
@@ -213,10 +213,17 @@ export default function FilterPanel({
                 className="btn btn-sm btn-outline border-base-300 gap-2 font-normal"
               >
                 {preferredCountry ? (
-                  <>
-                    <img src={flagUrl(preferredCountry)} alt="" className="h-3 w-4 rounded-sm object-cover" />
-                    {preferredCountry}
-                  </>
+                  preferredCountry === 'Global' ? (
+                    <>
+                      <Globe size={14} className="text-info" />
+                      Global
+                    </>
+                  ) : (
+                    <>
+                      <img src={flagUrl(preferredCountry)} alt="" className="h-3 w-4 rounded-sm object-cover" />
+                      {preferredCountry}
+                    </>
+                  )
                 ) : (
                   'Any country'
                 )}
