@@ -45,6 +45,7 @@ class ResolverResponse(BaseModel):
     no_logs: bool
     no_filter: bool
     country: str | None = None
+    country_source: str | None = None
 
 
 async def _cleanup_loop(client: CloudflareClient, comment_filter: str) -> None:
