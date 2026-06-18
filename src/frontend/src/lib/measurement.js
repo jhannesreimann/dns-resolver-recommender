@@ -40,6 +40,7 @@ export async function fetchResolversFromAPI() {
     url: r.url,
     ip_address: r.ip_address || null,
     country: r.country || null,
+    country_source: r.country_source || null,
     dnssec: !!r.dnssec,
     noLogs: !!r.no_logs,
     noFilter: !!r.no_filter,
