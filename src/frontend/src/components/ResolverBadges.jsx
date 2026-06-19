@@ -51,7 +51,7 @@ export function FeatureBadges({ resolver }) {
   return (
     <span className="flex items-center gap-1">
       {active.map(({ key, tone, icon: Icon, label, tip }) => (
-        <span key={key} className={`tooltip tooltip-bottom rounded-md p-1 ${TONE[tone]}`} data-tip={tip} aria-label={label}>
+        <span key={key} className={`tooltip tooltip-right rounded-md p-1 ${TONE[tone]}`} data-tip={tip} aria-label={label}>
           <Icon size={12} strokeWidth={2.5} />
         </span>
       ))}

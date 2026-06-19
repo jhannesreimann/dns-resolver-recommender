@@ -184,7 +184,7 @@ export default function ResultsTable({ results, running, expertMode, onExtend })
   const hiddenCount = results.length - visible.length;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-base-300 bg-base-100">
+    <div className="rounded-2xl border border-base-300 bg-base-100 [&_tr]:overflow-visible [&_td]:overflow-visible">
       <div className="overflow-x-auto overflow-y-hidden">
         <table className="table w-full">
           <thead>
