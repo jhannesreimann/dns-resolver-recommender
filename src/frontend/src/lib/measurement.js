@@ -13,33 +13,22 @@ const TIMING_BUFFER_SIZE = 2048;
 try { performance.setResourceTimingBufferSize(TIMING_BUFFER_SIZE); } catch {}
 
 /*
- * Collect real-time Performance Resource Timing entries via an Observer.
- * The observer fires for every resource as it completes, so we catch entries
- * even for opaque (no-cors) fetches that might be evicted from the buffer.
+ * Detect the HTTP protocol version used to reach a DoH resolver by firing one
+ * lightweight JS-side fetch in no-cors mode and reading nextHopProtocol from
+ * the Performance Resource Timing entry. WASM-initiated fetches do not reliably
+ * create entries accessible from JS, so this probe is done from plain JS.
+ * Returns "h2", "h3", "http/1.1", or null if unavailable.
  */
-const _httpVersionMap = new Map();
-let _observerStarted = false;
-
-function _startObserver() {
-  if (_observerStarted) return;
-  _observerStarted = true;
+async function getDohHttpVersion(dohUrl) {
   try {
-    const obs = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        if (entry.nextHopProtocol && entry.name.includes('?dns=')) {
-          // Key by the base URL (before ?dns=)
-          const baseUrl = entry.name.split('?dns=')[0];
-          _httpVersionMap.set(baseUrl, entry.nextHopProtocol);
-        }
-      }
-    });
-    obs.observe({ type: 'resource', buffered: true });
-  } catch {}
-}
-
-function getDohHttpVersion(dohUrl) {
-  try {
-    return _httpVersionMap.get(dohUrl) || null;
+    const probeUrl = `${dohUrl}?dns=example.com`;
+    // Clear any stale entry from a previous probe.
+    performance.clearResourceTimings();
+    await fetch(probeUrl, { mode: 'no-cors' });
+    const entries = performance.getEntriesByName(probeUrl);
+    if (entries.length > 0 && entries[entries.length - 1].nextHopProtocol) {
+      return entries[entries.length - 1].nextHopProtocol;
+    }
   } catch {}
   return null;
 }
@@ -206,7 +195,8 @@ async function measureResolver(resolver) {
 
 export async function runMeasurement(resolvers, onProgress, signal) {
   await ensureWasm();
-  _startObserver();
+  // Pre-size the Performance buffer so probe entries are not evicted.
+  try { performance.setResourceTimingBufferSize(TIMING_BUFFER_SIZE); } catch {}
   const results = [];
   const total = resolvers.length;
   let cursor = 0;
