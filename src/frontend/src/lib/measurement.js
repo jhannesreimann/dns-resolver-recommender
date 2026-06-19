@@ -13,22 +13,33 @@ const TIMING_BUFFER_SIZE = 2048;
 try { performance.setResourceTimingBufferSize(TIMING_BUFFER_SIZE); } catch {}
 
 /*
- * Extract the HTTP protocol version used for a specific DoH fetch from the
- * Performance Resource Timing API. `nextHopProtocol` is not restricted by
- * CORS headers, so this works for both CORS and opaque (no-cors) requests.
- * Returns "h2", "h3", or "http/1.1", or null if unavailable.
+ * Collect real-time Performance Resource Timing entries via an Observer.
+ * The observer fires for every resource as it completes, so we catch entries
+ * even for opaque (no-cors) fetches that might be evicted from the buffer.
  */
+const _httpVersionMap = new Map();
+let _observerStarted = false;
+
+function _startObserver() {
+  if (_observerStarted) return;
+  _observerStarted = true;
+  try {
+    const obs = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.nextHopProtocol && entry.name.includes('?dns=')) {
+          // Key by the base URL (before ?dns=)
+          const baseUrl = entry.name.split('?dns=')[0];
+          _httpVersionMap.set(baseUrl, entry.nextHopProtocol);
+        }
+      }
+    });
+    obs.observe({ type: 'resource', buffered: true });
+  } catch {}
+}
+
 function getDohHttpVersion(dohUrl) {
   try {
-    // Scan all resource timing entries for this resolver's URL. The WASM
-    // module fetches <dohUrl>?dns=<uuid> with unique UUIDs, so we match by
-    // URL prefix instead of exact name.
-    const entries = performance.getEntriesByType('resource');
-    for (let i = entries.length - 1; i >= 0; i--) {
-      if (entries[i].name.startsWith(dohUrl) && entries[i].nextHopProtocol) {
-        return entries[i].nextHopProtocol;
-      }
-    }
+    return _httpVersionMap.get(dohUrl) || null;
   } catch {}
   return null;
 }
@@ -195,6 +206,7 @@ async function measureResolver(resolver) {
 
 export async function runMeasurement(resolvers, onProgress, signal) {
   await ensureWasm();
+  _startObserver();
   const results = [];
   const total = resolvers.length;
   let cursor = 0;
