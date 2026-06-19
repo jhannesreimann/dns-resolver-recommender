@@ -24,8 +24,12 @@ async function getDohHttpVersion(dohUrl) {
     const probeUrl = `${dohUrl}?dns=example.com`;
     await fetch(probeUrl, { mode: 'no-cors' });
     const entries = performance.getEntriesByName(probeUrl);
-    if (entries.length > 0 && entries[entries.length - 1].nextHopProtocol) {
-      return entries[entries.length - 1].nextHopProtocol;
+    if (entries.length > 0) {
+      const proto = entries[entries.length - 1].nextHopProtocol;
+      // Return the protocol even if it is an empty string — null means
+      // "no entry found", empty string means "entry exists but browser
+      // did not expose the protocol".
+      if (proto !== undefined) return proto || null;
     }
   } catch {}
   return null;
