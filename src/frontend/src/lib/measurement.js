@@ -22,8 +22,6 @@ try { performance.setResourceTimingBufferSize(TIMING_BUFFER_SIZE); } catch {}
 async function getDohHttpVersion(dohUrl) {
   try {
     const probeUrl = `${dohUrl}?dns=example.com`;
-    // Clear any stale entry from a previous probe.
-    performance.clearResourceTimings();
     await fetch(probeUrl, { mode: 'no-cors' });
     const entries = performance.getEntriesByName(probeUrl);
     if (entries.length > 0 && entries[entries.length - 1].nextHopProtocol) {
@@ -170,7 +168,7 @@ async function measureResolver(resolver) {
 
   const cached = await measureCachedPhase(resolver.url, cors);
   const uncached = await measureUncachedPhase(resolver.url, cors);
-  const dohHttpVersion = getDohHttpVersion(resolver.url);
+  const dohHttpVersion = await getDohHttpVersion(resolver.url);
 
   const score =
     cached.avg != null && uncached.avg != null
