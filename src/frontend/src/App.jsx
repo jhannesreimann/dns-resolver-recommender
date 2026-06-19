@@ -181,6 +181,7 @@ export default function App() {
 
       // Submit telemetry immediately so data is saved even if the user closes
       // the tab before Cloudflare verification finishes.
+      let telRunId = null;
       if (optIn && rawResults.length > 0) {
         const payload = {
           userAgent: navigator.userAgent,
@@ -208,7 +209,6 @@ export default function App() {
             uncachedTimes: res.uncachedSamples || [],
           })),
         };
-        let telRunId = null;
         try { const tel = await submitTelemetry(payload); telRunId = tel.run_id; } catch {}
       }
 
