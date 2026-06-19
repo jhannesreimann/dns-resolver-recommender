@@ -28,7 +28,7 @@ ANYCAST_TAGS: dict[str, str] = {
     "opendns": "Global",
     "mullvad": "Global",
     "he": "Global",
-    # Regional anycast
+    # Regional anycast (multi-country or country-wide anycast networks)
     "yandex": "RU,BY,KZ",
     "alidns": "CN,HK",
     "dnspod": "CN,HK",
@@ -219,8 +219,10 @@ def parse_resolvers_markdown(content: str) -> list[dict[str, Any]]:
                     country = anycast_tag
                     if anycast_tag == 'Global':
                         country_source = 'Global anycast'
+                    elif ',' in anycast_tag:
+                        country_source = f'Multi-country anycast ({anycast_tag})'
                     else:
-                        country_source = 'Regional/institutional anycast'
+                        country_source = f'Institutional resolver based in {anycast_tag}'
                 else:
                     ip = stamp_info["ip_address"]
                     country = _geoip_country(ip)
