@@ -258,10 +258,12 @@ def update_verification_status(
     db_conn = db.connect()
     try:
         for u in updates:
+            status = u.verification_status if hasattr(u, 'verification_status') else u.get("verification_status")
+            rid = u.resolver_id if hasattr(u, 'resolver_id') else u.get("resolver_id")
             db_conn.execute(
                 "UPDATE measurements SET verification_status = %s "
                 "WHERE run_id = %s AND resolver_id = %s",
-                (u.get("verification_status"), run_id, u.get("resolver_id")),
+                (status, run_id, rid),
             )
         db_conn.commit()
     except Exception:
