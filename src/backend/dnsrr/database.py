@@ -149,10 +149,15 @@ postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DATAB
         for col, col_type in [
             ("client_http_version", "TEXT"),
             ("client_ip_version", "INTEGER"),
-            ("doh_http_version", "TEXT"),
         ]:
             db_conn.execute(
                 f"ALTER TABLE runs ADD COLUMN IF NOT EXISTS {col} {col_type}"
+            )
+        for col, col_type in [
+            ("doh_http_version", "TEXT"),
+        ]:
+            db_conn.execute(
+                f"ALTER TABLE measurements ADD COLUMN IF NOT EXISTS {col} {col_type}"
             )
         db_conn.commit()
         db_conn.close()
