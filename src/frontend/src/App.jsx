@@ -199,9 +199,11 @@ export default function App() {
             country: res.resolver.country,
             verificationStatus: res.dead
               ? 'dead'
-              : res.canaryVerified || res.resolver.cors
+              : res.resolver.cors
                 ? 'verified_dns'
-                : 'unverified',
+                : res.canaryVerified
+                  ? 'verified_canary'
+                  : 'unverified',
             cachedTimes: res.cachedSamples || [],
             uncachedTimes: res.uncachedSamples || [],
           })),
