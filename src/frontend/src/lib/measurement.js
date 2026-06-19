@@ -6,34 +6,6 @@
 const MEASUREMENT_TIMEOUT_MS = 3000;
 const CACHED_DOMAIN = 'example.com';
 const WILDCARD_ZONE = 'diic-hpi.org';
-const TIMING_BUFFER_SIZE = 2048;
-
-// Ensure the Performance Resource Timing buffer is large enough for our full
-// measurement run (102 resolvers × ~12 fetches each ≈ 1224 entries).
-try { performance.setResourceTimingBufferSize(TIMING_BUFFER_SIZE); } catch {}
-
-/*
- * Detect the HTTP protocol version used to reach a DoH resolver by firing one
- * lightweight JS-side fetch in no-cors mode and reading nextHopProtocol from
- * the Performance Resource Timing entry. WASM-initiated fetches do not reliably
- * create entries accessible from JS, so this probe is done from plain JS.
- * Returns "h2", "h3", "http/1.1", or null if unavailable.
- */
-async function getDohHttpVersion(dohUrl) {
-  try {
-    const probeUrl = `${dohUrl}?dns=example.com`;
-    await fetch(probeUrl, { mode: 'no-cors' });
-    const entries = performance.getEntriesByName(probeUrl);
-    if (entries.length > 0) {
-      const proto = entries[entries.length - 1].nextHopProtocol;
-      // Return the protocol even if it is an empty string — null means
-      // "no entry found", empty string means "entry exists but browser
-      // did not expose the protocol".
-      if (proto !== undefined) return proto || null;
-    }
-  } catch {}
-  return null;
-}
 const CONCURRENCY = 12;
 
 let wasmReady = false;
@@ -172,7 +144,6 @@ async function measureResolver(resolver) {
 
   const cached = await measureCachedPhase(resolver.url, cors);
   const uncached = await measureUncachedPhase(resolver.url, cors);
-  const dohHttpVersion = await getDohHttpVersion(resolver.url);
 
   const score =
     cached.avg != null && uncached.avg != null
@@ -188,7 +159,6 @@ async function measureResolver(resolver) {
     uncachedSamples: uncached.samples,
     canaryDomain: uncached.canaryDomain,
     domains: uncached.domains,
-    dohHttpVersion,
     paradox: uncached.avg != null && cached.avg != null && uncached.avg < cached.avg,
     dead: false,
     done: true,
@@ -198,7 +168,6 @@ async function measureResolver(resolver) {
 export async function runMeasurement(resolvers, onProgress, signal) {
   await ensureWasm();
   // Pre-size the Performance buffer so probe entries are not evicted.
-  try { performance.setResourceTimingBufferSize(TIMING_BUFFER_SIZE); } catch {}
   const results = [];
   const total = resolvers.length;
   let cursor = 0;
