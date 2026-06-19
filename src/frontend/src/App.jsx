@@ -219,7 +219,7 @@ export default function App() {
     } finally {
       setRunning(false);
     }
-  }, [resolvers, verifyOpaqueAndReport]);
+  }, [resolvers, verifyOpaqueAndReport, optIn]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
