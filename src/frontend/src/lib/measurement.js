@@ -20,11 +20,14 @@ try { performance.setResourceTimingBufferSize(TIMING_BUFFER_SIZE); } catch {}
  */
 function getDohHttpVersion(dohUrl) {
   try {
-    const fullUrl = `${dohUrl}?dns=${CACHED_DOMAIN}`;
-    const entries = performance.getEntriesByName(fullUrl);
-    if (entries.length > 0) {
-      const proto = entries[entries.length - 1].nextHopProtocol;
-      if (proto) return proto;
+    // Scan all resource timing entries for this resolver's URL. The WASM
+    // module fetches <dohUrl>?dns=<uuid> with unique UUIDs, so we match by
+    // URL prefix instead of exact name.
+    const entries = performance.getEntriesByType('resource');
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].name.startsWith(dohUrl) && entries[i].nextHopProtocol) {
+        return entries[i].nextHopProtocol;
+      }
     }
   } catch {}
   return null;
