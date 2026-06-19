@@ -133,6 +133,7 @@ export default function App() {
                 : res.cloudflareVerified
                   ? 'verified_auth'
                   : 'unverified',
+            dohHttpVersion: res.dohHttpVersion || null,
             cachedTimes: res.cachedSamples || [],
             uncachedTimes: res.uncachedSamples || [],
           })),

@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS measurements (
     verification_status TEXT,
     paradox INTEGER NOT NULL DEFAULT 0,
     cached_times TEXT,
-    uncached_times TEXT
+    uncached_times TEXT,
+    doh_http_version TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_measurements_run ON measurements(run_id);
@@ -148,6 +149,7 @@ postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DATAB
         for col, col_type in [
             ("client_http_version", "TEXT"),
             ("client_ip_version", "INTEGER"),
+            ("doh_http_version", "TEXT"),
         ]:
             db_conn.execute(
                 f"ALTER TABLE runs ADD COLUMN IF NOT EXISTS {col} {col_type}"

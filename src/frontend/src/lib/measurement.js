@@ -6,8 +6,29 @@
 const MEASUREMENT_TIMEOUT_MS = 3000;
 const CACHED_DOMAIN = 'example.com';
 const WILDCARD_ZONE = 'diic-hpi.org';
-// How many resolvers to probe in parallel. Keeps the full 100+ run responsive
-// without flooding the local network/connection pool.
+const TIMING_BUFFER_SIZE = 2048;
+
+// Ensure the Performance Resource Timing buffer is large enough for our full
+// measurement run (102 resolvers × ~12 fetches each ≈ 1224 entries).
+try { performance.setResourceTimingBufferSize(TIMING_BUFFER_SIZE); } catch {}
+
+/*
+ * Extract the HTTP protocol version used for a specific DoH fetch from the
+ * Performance Resource Timing API. `nextHopProtocol` is not restricted by
+ * CORS headers, so this works for both CORS and opaque (no-cors) requests.
+ * Returns "h2", "h3", or "http/1.1", or null if unavailable.
+ */
+function getDohHttpVersion(dohUrl) {
+  try {
+    const fullUrl = `${dohUrl}?dns=${CACHED_DOMAIN}`;
+    const entries = performance.getEntriesByName(fullUrl);
+    if (entries.length > 0) {
+      const proto = entries[entries.length - 1].nextHopProtocol;
+      if (proto) return proto;
+    }
+  } catch {}
+  return null;
+}
 const CONCURRENCY = 12;
 
 let wasmReady = false;
@@ -146,6 +167,7 @@ async function measureResolver(resolver) {
 
   const cached = await measureCachedPhase(resolver.url, cors);
   const uncached = await measureUncachedPhase(resolver.url, cors);
+  const dohHttpVersion = getDohHttpVersion(resolver.url);
 
   const score =
     cached.avg != null && uncached.avg != null
@@ -161,6 +183,7 @@ async function measureResolver(resolver) {
     uncachedSamples: uncached.samples,
     canaryDomain: uncached.canaryDomain,
     domains: uncached.domains,
+    dohHttpVersion,
     paradox: uncached.avg != null && cached.avg != null && uncached.avg < cached.avg,
     dead: false,
     done: true,
