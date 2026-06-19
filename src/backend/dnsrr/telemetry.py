@@ -208,8 +208,8 @@ def store_telemetry(db: PostgresDatabase, payload: dict, request_headers: dict,
                 """INSERT INTO measurements (run_id, resolver_id, resolver_name,
                    resolver_url, cached_avg_ms, uncached_avg_ms, score_ms, cors,
                    dnssec, no_logs, no_filter, resolver_country, verification_status,
-                   paradox, cached_times, uncached_times, doh_http_version)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                   paradox, cached_times, uncached_times)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     run_id,
                     r.get("id", "unknown"),
@@ -228,7 +228,6 @@ def store_telemetry(db: PostgresDatabase, payload: dict, request_headers: dict,
                           and r["uncachedAvgMs"] < r["cachedAvgMs"]) else 0,
                     json.dumps(r.get("cachedTimes", [])) if r.get("cachedTimes") else None,
                     json.dumps(r.get("uncachedTimes", [])) if r.get("uncachedTimes") else None,
-                    r.get("dohHttpVersion"),
                 ),
             )
 
