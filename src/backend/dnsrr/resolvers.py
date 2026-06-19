@@ -217,10 +217,10 @@ def parse_resolvers_markdown(content: str) -> list[dict[str, Any]]:
                 anycast_tag = _tag_anycast(current_name)
                 if anycast_tag:
                     country = anycast_tag
-                    if ',' in anycast_tag:
-                        country_source = 'Regional anycast'
-                    else:
+                    if anycast_tag == 'Global':
                         country_source = 'Global anycast'
+                    else:
+                        country_source = 'Regional/institutional anycast'
                 else:
                     ip = stamp_info["ip_address"]
                     country = _geoip_country(ip)
