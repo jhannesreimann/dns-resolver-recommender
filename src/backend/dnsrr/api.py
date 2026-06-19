@@ -17,7 +17,7 @@ from dnsrr.database import DatabaseParameters, PostgresDatabase
 from .cloudflare import CloudflareClient, CloudflareError
 from .config import Settings, get_settings
 from .resolvers import get_resolvers
-from .telemetry import get_stats, store_telemetry
+from .telemetry import get_stats, store_telemetry, update_verification_status
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +315,29 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to store telemetry data",
+            ) from exc
+
+    class VerifyUpdateItem(BaseModel):
+        resolver_id: str
+        verification_status: str
+
+    class VerifyUpdatePayload(BaseModel):
+        updates: list[VerifyUpdateItem]
+
+    @app.patch("/api/telemetry/{run_id}/verify")
+    async def update_verification(
+        run_id: int,
+        body: VerifyUpdatePayload,
+    ):
+        """Update verification status for specific resolvers after Cloudflare polling."""
+        try:
+            await asyncio.to_thread(update_verification_status, db, run_id, body.updates)
+            return {"status": "ok"}
+        except Exception as exc:
+            logger.exception("Verification update failed")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update verification status",
             ) from exc
 
     class StatsResponse(BaseModel):

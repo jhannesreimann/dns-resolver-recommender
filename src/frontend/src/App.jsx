@@ -16,7 +16,7 @@ import {
   DEFAULT_WEIGHTS,
   PRIORITY_KEYS,
 } from './lib/scoring';
-import { verifyCanary, verifyCloudflare, submitTelemetry } from './lib/api';
+import { verifyCanary, verifyCloudflare, submitTelemetry, updateVerificationStatus } from './lib/api';
 
 const COUNTRY_KEYS = [...PRIORITY_KEYS, 'countryMatch'];
 
@@ -57,7 +57,7 @@ export default function App() {
   // to 90s), so it runs detached from the main flow and upgrades badges live.
   // Telemetry is submitted here too, after badges reflect their final state.
   const verifyOpaqueAndReport = useCallback(
-    async (rawResults, signal) => {
+    async (rawResults, signal, telRunId) => {
       const refresh = () => setResults((prev) => [...prev]);
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -106,45 +106,25 @@ export default function App() {
           r.verifying = false;
         });
         refresh();
-      }
 
-      if (signal?.aborted) return;
-
-      if (optIn && rawResults.length > 0) {
-        const payload = {
-          userAgent: navigator.userAgent,
-          browserLang: navigator.language,
-          resolvers: rawResults.map((res) => ({
-            id: res.resolver.id,
-            name: res.resolver.name,
-            url: res.resolver.url,
-            cachedAvgMs: res.cachedAvg,
-            uncachedAvgMs: res.uncachedAvg,
-            scoreMs: res.scoreMs,
-            cors: res.resolver.cors,
-            dnssec: res.resolver.dnssec,
-            noLogs: res.resolver.noLogs,
-            noFilter: res.resolver.noFilter,
-            country: res.resolver.country,
-            verificationStatus: res.dead
-              ? 'dead'
-              : res.canaryVerified || res.resolver.cors
-                ? 'verified_dns'
-                : res.cloudflareVerified
-                  ? 'verified_auth'
-                  : 'unverified',
-            cachedTimes: res.cachedSamples || [],
-            uncachedTimes: res.uncachedSamples || [],
-          })),
-        };
-        try {
-          await submitTelemetry(payload);
-        } catch {
-          /* telemetry is best-effort */
+        if (telRunId) {
+          const verified = opaque.filter((r) => r.cloudflareVerified);
+          if (verified.length > 0) {
+            try {
+              await updateVerificationStatus(
+                telRunId,
+                verified.map((r) => ({
+                  resolver_id: r.resolver.id,
+                  verification_status: 'verified_auth',
+                }))
+              );
+            } catch {}
+          }
         }
       }
+
     },
-    [optIn]
+    []
   );
 
   const run = useCallback(async () => {
@@ -199,8 +179,39 @@ export default function App() {
       // Measurements + canary done: surface results immediately.
       setResults((prev) => [...prev].sort((a, b) => (a.scoreMs ?? 9999) - (b.scoreMs ?? 9999)));
 
-      // Detached tier-3 verification + telemetry; never blocks the UI.
-      void verifyOpaqueAndReport(rawResults, controller.signal);
+      // Submit telemetry immediately so data is saved even if the user closes
+      // the tab before Cloudflare verification finishes.
+      if (optIn && rawResults.length > 0) {
+        const payload = {
+          userAgent: navigator.userAgent,
+          browserLang: navigator.language,
+          resolvers: rawResults.map((res) => ({
+            id: res.resolver.id,
+            name: res.resolver.name,
+            url: res.resolver.url,
+            cachedAvgMs: res.cachedAvg,
+            uncachedAvgMs: res.uncachedAvg,
+            scoreMs: res.scoreMs,
+            cors: res.resolver.cors,
+            dnssec: res.resolver.dnssec,
+            noLogs: res.resolver.noLogs,
+            noFilter: res.resolver.noFilter,
+            country: res.resolver.country,
+            verificationStatus: res.dead
+              ? 'dead'
+              : res.canaryVerified || res.resolver.cors
+                ? 'verified_dns'
+                : 'unverified',
+            cachedTimes: res.cachedSamples || [],
+            uncachedTimes: res.uncachedSamples || [],
+          })),
+        };
+        let telRunId = null;
+        try { const tel = await submitTelemetry(payload); telRunId = tel.run_id; } catch {}
+      }
+
+      // Detached tier-3 Cloudflare verification; never blocks the UI.
+      void verifyOpaqueAndReport(rawResults, controller.signal, telRunId);
     } catch (e) {
       console.error('Measurement failed', e);
     } finally {

@@ -251,6 +251,26 @@ def _rows_to_dicts(cursor) -> list[dict]:
     return [dict(zip(cols, row)) for row in cursor]
 
 
+def update_verification_status(
+    db: PostgresDatabase, run_id: int, updates: list[dict]
+) -> None:
+    """Update verification_status for specific resolvers in a run."""
+    db_conn = db.connect()
+    try:
+        for u in updates:
+            db_conn.execute(
+                "UPDATE measurements SET verification_status = %s "
+                "WHERE run_id = %s AND resolver_id = %s",
+                (u.get("verification_status"), run_id, u.get("resolver_id")),
+            )
+        db_conn.commit()
+    except Exception:
+        db_conn.rollback()
+        raise
+    finally:
+        db_conn.close()
+
+
 def get_stats(db: PostgresDatabase) -> dict:
     """Return aggregate statistics for the dashboard/research."""
     db_conn = db.connect()

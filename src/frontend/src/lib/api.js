@@ -26,3 +26,13 @@ export async function submitTelemetry(payload) {
   });
   return res.json();
 }
+
+export async function updateVerificationStatus(runId, updates) {
+  try {
+    await fetch(`${API_BASE}/api/telemetry/${runId}/verify`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updates }),
+    });
+  } catch {}
+}
