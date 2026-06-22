@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   ShieldCheck,
   EyeOff,
-  Globe,
+  Radio,
   BadgeCheck,
   ServerCog,
   Clock,
@@ -24,7 +24,7 @@ const TONE = {
 const FEATURES = [
   { key: 'dnssec', label: 'DNSSEC', tone: 'success', icon: ShieldCheck, tip: 'Cryptographically validated answers (DNSSEC)' },
   { key: 'noLogs', label: 'No-logs', tone: 'info', icon: EyeOff, tip: 'Operator advertises a no-logging policy' },
-  { key: 'noFilter', label: 'Unfiltered', tone: 'primary', icon: Globe, tip: 'Resolves every domain, no ad/content blocking' },
+  { key: 'noFilter', label: 'Unfiltered', tone: 'primary', icon: Radio, tip: 'Resolves every domain, no ad/content blocking' },
 ];
 
 function Pill({ tone = 'neutral', icon: Icon, children, tip }) {
