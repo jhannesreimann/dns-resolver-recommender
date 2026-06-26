@@ -295,15 +295,20 @@ export default function App() {
                 transition={{ duration: 0.6, delay: 0.4 }}
               >
                 <StartButton running={running} onStart={run} />
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-base-content/60">
-                  <input
-                    type="checkbox"
-                    checked={optIn}
-                    onChange={(e) => setOptIn(e.target.checked)}
-                    className="checkbox checkbox-primary checkbox-sm"
-                  />
-                  Share anonymized results with HPI for research
-                </label>
+                <div className="flex flex-col items-center gap-1">
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-base-content/60">
+                    <input
+                      type="checkbox"
+                      checked={optIn}
+                      onChange={(e) => setOptIn(e.target.checked)}
+                      className="checkbox checkbox-primary checkbox-sm"
+                    />
+                    Share anonymized results with HPI for research.
+                  </label>
+                  <a href="/privacy.html" className="link link-primary text-[11px]">
+                    See our data collection disclosure for details.
+                  </a>
+                </div>
               </motion.div>
             </motion.div>
           ) : (
