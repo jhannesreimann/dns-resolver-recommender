@@ -22,6 +22,18 @@ from .telemetry import get_stats, store_telemetry, update_verification_status
 logger = logging.getLogger(__name__)
 
 
+def _client_http_version(headers: dict) -> str:
+    """Read the real client HTTP protocol from the nginx-passed header.
+    nginx sets $http2 to 'h2' for HTTP/2 connections, $http3 to 'h3' for QUIC.
+    Returns '1.1', '2', or '3'."""
+    proto = headers.get("x-client-protocol", "")
+    if proto == "h3":
+        return "3"
+    if proto == "h2":
+        return "2"
+    return "1.1"
+
+
 class RotateResponse(BaseModel):
     """Response payload for POST /api/dns/rotate."""
 
@@ -307,7 +319,7 @@ def create_app() -> FastAPI:
                 body,
                 dict(request.headers),
                 request.client.host if request.client else None,
-                request.scope.get("http_version", ""),
+                _client_http_version(request.headers),
             )
             return TelemetryResponse(**result)
         except Exception as exc:
