@@ -1,5 +1,6 @@
 import base64
 import ipaddress
+import json
 import logging
 import os
 import re
@@ -264,13 +265,22 @@ def parse_resolvers_markdown(content: str) -> list[dict[str, Any]]:
     return resolvers
 
 
+def _load_h3_cache() -> dict[str, bool]:
+    """Load resolver HTTP/3 support status from the probe cache file."""
+    try:
+        with open("/var/lib/dnsrr/resolver_h3.json") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
 async def get_resolvers(force_refresh: bool = False) -> list[dict[str, Any]]:
     """Get the list of DoH resolvers, utilizing cached data if valid."""
     global _cached_resolvers, _cache_last_updated
-    
+
     current_time = time.time()
     cache_age = current_time - _cache_last_updated
-    
+
     if _cached_resolvers and cache_age < CACHE_DURATION_SECONDS and not force_refresh:
         return _cached_resolvers
         
@@ -283,6 +293,9 @@ async def get_resolvers(force_refresh: bool = False) -> list[dict[str, Any]]:
             
         parsed = parse_resolvers_markdown(content)
         if parsed:
+            h3_cache = _load_h3_cache()
+            for r in parsed:
+                r["supports_h3"] = h3_cache.get(r["id"], False)
             _cached_resolvers = parsed
             _cache_last_updated = current_time
             logger.info("Successfully loaded and cached %d DoH resolvers", len(parsed))

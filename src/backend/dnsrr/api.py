@@ -58,6 +58,7 @@ class ResolverResponse(BaseModel):
     no_filter: bool
     country: str | None = None
     country_source: str | None = None
+    supports_h3: bool = False
 
 
 async def _cleanup_loop(client: CloudflareClient, comment_filter: str) -> None:

@@ -62,6 +62,12 @@ function ExpandRow({ result }) {
               <span>{r.country ? r.country.replace(/,/g, ', ') : '--'}</span>
             </span>
           </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="w-16 shrink-0 text-base-content/50">HTTP/3</span>
+            <span className={`text-base-content/80 ${r.supports_h3 ? 'text-success' : 'text-base-content/40'}`}>
+              {r.supports_h3 ? 'Supported' : 'Unknown'}
+            </span>
+          </div>
           <p className="pt-1 text-[11px] leading-relaxed text-base-content/45">
             Add the DoH URL to your browser&rsquo;s Secure DNS setting to use this resolver.
           </p>

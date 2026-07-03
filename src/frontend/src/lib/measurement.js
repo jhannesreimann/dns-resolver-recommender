@@ -42,6 +42,7 @@ export async function fetchResolversFromAPI() {
     dnssec: !!r.dnssec,
     noLogs: !!r.no_logs,
     noFilter: !!r.no_filter,
+    supports_h3: !!r.supports_h3,
     cors: guessCors(r.url),
   }));
 }
