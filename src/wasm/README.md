@@ -1,6 +1,6 @@
 # WebAssembly DoH Engine
 
-This Rust module is compiled to WebAssembly to provide an academic-grade DNS-over-HTTPS (DoH) measurement engine for the browser.
+This Rust module is compiled to WebAssembly to provide an academic-grade DNS-over-HTTPS (DoH) measurement engine for the browser. Uses `hickory-proto` for RFC 8484 binary DNS message construction and parsing, and `web-sys` for browser fetch API integration.
 
 ## Why Wasm?
 
@@ -11,8 +11,9 @@ We chose Rust + Wasm over pure JavaScript for several reasons:
 ## Building
 
 ```bash
-cargo install wasm-pack
 wasm-pack build --target web
 ```
 
-This generates a `pkg/` directory which is directly imported by the frontend JavaScript.
+This generates a `pkg/` directory. The output is then vendored into `src/frontend/src/wasm/` so the frontend builds with Node alone, no Rust toolchain needed on CI.
+
+See `src/frontend/src/wasm/README.md` for the vendoring instructions.

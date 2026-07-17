@@ -34,8 +34,8 @@ Assumes the base packages (`nginx`, `python3`, `python3-venv`, `certbot`,
 3. Sync the backend code to the VM and install it inside a venv.
 
    ```bash
-   sudo -u dnsrr python3 -m venv /opt/dnsrr/backend/.venv
-   sudo -u dnsrr /opt/dnsrr/backend/.venv/bin/pip install -e /opt/dnsrr/backend
+   sudo -u dnsrr python3 -m venv /opt/dnsrr/src/backend/.venv
+   sudo -u dnsrr /opt/dnsrr/src/backend/.venv/bin/pip install -e /opt/dnsrr/src/backend
    ```
 
 4. Install the systemd unit and start it.
