@@ -4,6 +4,18 @@ ENGINE="podman"
 
 set -eu
 
+for arg in "$@"; do
+  case "$arg" in
+    --engine=*)
+      ENGINE="${arg#--engine=}"
+      ;;
+    *)
+      echo "Unknown argument: $arg" >&2
+      exit 1
+      ;;
+  esac
+done
+
 IMAGE_NAME="${IMAGE_NAME:-dns-recommender-measurement}"
 MEASUREMENT_URL="${MEASUREMENT_URL:-https://dns.diic-hpi.org}"
 MEASUREMENT_TIMEOUT="${MEASUREMENT_TIMEOUT:-900}"
