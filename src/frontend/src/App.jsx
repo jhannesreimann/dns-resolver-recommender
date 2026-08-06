@@ -284,7 +284,7 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.25 }}
               >
-                Measure and compare 100+ public DNS-over-HTTPS resolvers directly from your
+                Measure and compare 200+ public DNS-over-HTTPS resolvers directly from your
                 browser. Find the right balance of speed, privacy, and security for your
                 connection.
               </motion.p>
