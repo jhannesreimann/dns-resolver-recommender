@@ -15,6 +15,8 @@ function Stat({ label, value, unit, accent }) {
 }
 
 export default function RecommendationCard({ top }) {
+  console.log("[STATUS] Measurement Finished")
+
   if (!top) return null;
 
   const r = top.resolver;

@@ -128,6 +128,8 @@ export default function App() {
   );
 
   const run = useCallback(async () => {
+    console.log("[STATUS] Measurement started")
+
     abortRef.current?.abort();
     setRunning(true);
     setStarted(true);
