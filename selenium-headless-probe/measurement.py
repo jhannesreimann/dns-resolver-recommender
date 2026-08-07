@@ -1,312 +1,778 @@
+import json
 import os
 import sys
 import time
 from pathlib import Path
 
-from selenium.webdriver.firefox.service import Service
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 
-URL = os.getenv("MEASUREMENT_URL", "https://dns.diic-hpi.org")
-TIMEOUT = int(os.getenv("MEASUREMENT_TIMEOUT", "900"))
-OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/app/output"))
+URL = os.getenv(
+    "MEASUREMENT_URL",
+    "https://dns.diic-hpi.org",
+)
 
-OPT_IN_TEXT_MATCHES = (
-    "share anonymized results",
-    "share anonymous data",
-    "anonymous data",
+TIMEOUT = int(
+    os.getenv(
+        "MEASUREMENT_TIMEOUT",
+        "900",
+    )
+)
+
+OUTPUT_DIR = Path(
+    os.getenv(
+        "OUTPUT_DIR",
+        "/app/output",
+    )
 )
 
 
-def first_clickable(driver, selectors, timeout=30):
-    """Return the first visible and clickable element matching the selectors."""
-    end_time = time.monotonic() + timeout
+def save_screenshot(driver, filename):
+    OUTPUT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
-    while time.monotonic() < end_time:
-        for by, selector in selectors:
-            elements = driver.find_elements(by, selector)
+    path = OUTPUT_DIR / filename
+    driver.save_screenshot(str(path))
 
-            for element in elements:
-                try:
-                    if element.is_displayed() and element.is_enabled():
-                        return element
-                except Exception:
-                    continue
+    print(
+        f"Screenshot saved to {path}",
+        flush=True,
+    )
 
-        time.sleep(0.25)
 
-    raise TimeoutException(
-        f"No clickable element found using selectors: {selectors}"
+def dump_page_source(driver, filename):
+    OUTPUT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    path = OUTPUT_DIR / filename
+
+    path.write_text(
+        driver.page_source,
+        encoding="utf-8",
+    )
+
+    print(
+        f"Page source saved to {path}",
+        flush=True,
+    )
+
+
+def dump_diagnostics(driver):
+    OUTPUT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    try:
+        errors = driver.execute_script(
+            """
+            return window.__seleniumErrors || [];
+            """
+        )
+    except Exception:
+        errors = []
+
+    try:
+        interactive_elements = driver.execute_script(
+            """
+            return [
+                ...document.querySelectorAll(
+                    'button, input, label, ' +
+                    '[role="button"], ' +
+                    '[role="checkbox"], ' +
+                    '[role="switch"]'
+                )
+            ].map((element, index) => ({
+                index,
+                tag: element.tagName,
+                type: element.getAttribute("type"),
+                role: element.getAttribute("role"),
+                id: element.id,
+                name: element.getAttribute("name"),
+                text: (
+                    element.innerText ||
+                    element.textContent ||
+                    element.value ||
+                    ""
+                ).trim(),
+                ariaLabel: element.getAttribute("aria-label"),
+                disabled: Boolean(element.disabled),
+                displayed: Boolean(
+                    element.offsetWidth ||
+                    element.offsetHeight ||
+                    element.getClientRects().length
+                )
+            }));
+            """
+        )
+    except Exception:
+        interactive_elements = []
+
+    diagnostics = {
+        "url": driver.current_url,
+        "title": driver.title,
+        "readyState": driver.execute_script(
+            "return document.readyState;"
+        ),
+        "userAgent": driver.execute_script(
+            "return navigator.userAgent;"
+        ),
+        "javascriptErrors": errors,
+        "interactiveElements": interactive_elements,
+    }
+
+    path = OUTPUT_DIR / "diagnostics.json"
+
+    path.write_text(
+        json.dumps(
+            diagnostics,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    print(
+        json.dumps(
+            diagnostics,
+            indent=2,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+    print(
+        f"Diagnostics saved to {path}",
+        flush=True,
+    )
+
+
+def install_error_recorder(driver):
+    driver.execute_script(
+        """
+        window.__seleniumErrors = [];
+
+        window.addEventListener("error", event => {
+            window.__seleniumErrors.push({
+                type: "error",
+                message: event.message || String(event.error),
+                source: event.filename || "",
+                line: event.lineno || 0,
+                column: event.colno || 0
+            });
+        });
+
+        window.addEventListener(
+            "unhandledrejection",
+            event => {
+                window.__seleniumErrors.push({
+                    type: "unhandledrejection",
+                    message: String(event.reason)
+                });
+            }
+        );
+        """
+    )
+
+
+def application_is_ready(driver):
+    return driver.execute_script(
+        """
+        const elements = [
+            ...document.querySelectorAll(
+                'button, input, label, ' +
+                '[role="button"], ' +
+                '[role="checkbox"], ' +
+                '[role="switch"]'
+            )
+        ];
+
+        return elements.some(element => {
+            const text = [
+                element.innerText,
+                element.textContent,
+                element.value,
+                element.getAttribute("aria-label")
+            ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+            return (
+                text.includes("start measurement") ||
+                text.includes("opt-in") ||
+                text.includes("opt in") ||
+                text.includes("anonymized")
+            );
+        });
+        """
     )
 
 
 def click_opt_in(driver):
-    wait = WebDriverWait(driver, 30)
-
-    # Wait until the application has rendered its controls.
-    wait.until(
-        EC.presence_of_element_located((By.TAG_NAME, "body"))
+    print(
+        "Looking for opt-in control...",
+        flush=True,
     )
 
-    opt_in = wait.until(find_opt_in_control)
-    driver.execute_script(
-        "arguments[0].scrollIntoView({block: 'center'});",
-        opt_in,
+    xpath = (
+        "//*["
+        "self::button or "
+        "self::label or "
+        "@role='button' or "
+        "@role='checkbox' or "
+        "@role='switch'"
+        "]["
+        "contains("
+        "translate(normalize-space(.), "
+        "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+        "'abcdefghijklmnopqrstuvwxyz'), "
+        "'opt-in'"
+        ") or "
+        "contains("
+        "translate(normalize-space(.), "
+        "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+        "'abcdefghijklmnopqrstuvwxyz'), "
+        "'opt in'"
+        ") or "
+        "contains("
+        "translate(normalize-space(.), "
+        "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+        "'abcdefghijklmnopqrstuvwxyz'), "
+        "'anonymized'"
+        ")"
+        "]"
     )
 
-    checked = (
-        opt_in.is_selected()
-        if opt_in.tag_name.lower() == "input"
-        else opt_in.get_attribute("aria-checked") == "true"
-    )
-
-    if not checked:
-        try:
-            opt_in.click()
-        except Exception:
-            driver.execute_script("arguments[0].click();", opt_in)
-
-    if opt_in.tag_name.lower() == "input" and not opt_in.is_selected():
-        raise TimeoutException("The anonymous-data opt-in did not stay enabled.")
-
-    print("Anonymous research-data sharing enabled.", flush=True)
-
-
-def find_opt_in_control(driver):
-    control_selectors = [
-        "input[type='checkbox']",
-        "[role='checkbox']",
-        "[role='switch']",
-    ]
-
-    for selector in control_selectors:
-        for element in driver.find_elements(By.CSS_SELECTOR, selector):
-            try:
-                text = opt_in_context_text(driver, element)
-                if element.is_displayed() and matches_opt_in_text(text):
-                    return element
-            except Exception:
-                continue
-
-    return False
-
-
-def opt_in_context_text(driver, element):
-    labelled_by = element.get_attribute("aria-labelledby")
-    if labelled_by:
-        labels = []
-        for label_id in labelled_by.split():
-            label = driver.find_elements(By.ID, label_id)
-            if label:
-                labels.append(label[0].text)
-        if labels:
-            return " ".join(labels)
-
-    aria_label = element.get_attribute("aria-label")
-    if aria_label:
-        return aria_label
-
-    element_id = element.get_attribute("id")
-    if element_id:
-        labels = driver.find_elements(
-            By.XPATH,
-            f"//label[@for={xpath_literal(element_id)}]",
+    try:
+        element = WebDriverWait(
+            driver,
+            30,
+        ).until(
+            EC.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    xpath,
+                )
+            )
         )
-        if labels:
-            return " ".join(label.text for label in labels)
 
-    label_ancestor = element.find_elements(By.XPATH, "./ancestor::label[1]")
-    if label_ancestor:
-        return label_ancestor[0].text
+    except TimeoutException:
+        dump_diagnostics(driver)
+        save_screenshot(
+            driver,
+            "opt-in-error.png",
+        )
 
-    return element.text
+        raise TimeoutException(
+            "Could not find the opt-in control."
+        )
 
+    driver.execute_script(
+        """
+        arguments[0].scrollIntoView({
+            block: "center"
+        });
+        """,
+        element,
+    )
 
-def xpath_literal(value):
-    if "'" not in value:
-        return f"'{value}'"
-    if '"' not in value:
-        return f'"{value}"'
+    try:
+        element.click()
+    except Exception:
+        driver.execute_script(
+            "arguments[0].click();",
+            element,
+        )
 
-    return "concat(" + ', "\"", '.join(
-        f"'{part}'" for part in value.split('"')
-    ) + ")"
-
-
-def matches_opt_in_text(text):
-    normalized = " ".join(text.lower().split())
-    return any(match in normalized for match in OPT_IN_TEXT_MATCHES)
+    print(
+        "Opt-in selected.",
+        flush=True,
+    )
 
 
 def click_start_measurement(driver):
-    wait = WebDriverWait(driver, 30)
+    print(
+        "Looking for Start Measurement button...",
+        flush=True,
+    )
 
-    selectors = [
-        (
-            By.XPATH,
-            "//button[contains("
-            "translate(normalize-space(.), "
-            "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-            "'abcdefghijklmnopqrstuvwxyz'), "
-            "'start measurement'"
-            ")]",
-        ),
-        (
-            By.XPATH,
-            "//*[@role='button' and contains("
-            "translate(normalize-space(.), "
-            "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-            "'abcdefghijklmnopqrstuvwxyz'), "
-            "'start measurement'"
-            ")]",
-        ),
-        (
-            By.XPATH,
-            "//input["
-            "(@type='button' or @type='submit') and "
-            "contains("
-            "translate(@value, "
-            "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-            "'abcdefghijklmnopqrstuvwxyz'), "
-            "'start measurement'"
-            ")"
-            "]",
-        ),
-    ]
+    xpath = (
+        "//*["
+        "self::button or "
+        "@role='button'"
+        "]["
+        "contains("
+        "translate(normalize-space(.), "
+        "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+        "'abcdefghijklmnopqrstuvwxyz'), "
+        "'start measurement'"
+        ")"
+        "]"
+    )
 
-    for by, selector in selectors:
-        elements = driver.find_elements(by, selector)
+    try:
+        button = WebDriverWait(
+            driver,
+            30,
+        ).until(
+            EC.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    xpath,
+                )
+            )
+        )
 
-        for element in elements:
-            try:
-                if element.is_displayed() and element.is_enabled():
-                    driver.execute_script(
-                        "arguments[0].scrollIntoView({block: 'center'});",
-                        element,
-                    )
+    except TimeoutException:
+        dump_diagnostics(driver)
+        save_screenshot(
+            driver,
+            "start-button-error.png",
+        )
 
-                    try:
-                        element.click()
-                    except Exception:
-                        driver.execute_script(
-                            "arguments[0].click();",
-                            element,
-                        )
+        raise TimeoutException(
+            "Could not find the 'Start Measurement' button."
+        )
 
-                    print("Measurement started.", flush=True)
-                    return
+    driver.execute_script(
+        """
+        arguments[0].scrollIntoView({
+            block: "center"
+        });
+        """,
+        button,
+    )
 
-            except Exception:
-                continue
+    try:
+        button.click()
+    except Exception:
+        driver.execute_script(
+            "arguments[0].click();",
+            button,
+        )
 
-    raise TimeoutException(
-        "Could not find the 'Start measurement' button."
+    print(
+        "Measurement started.",
+        flush=True,
     )
 
 
 def measurement_finished(driver):
-    body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+    return driver.execute_script(
+        """
+        const visible = element => {
+            if (!element) {
+                return false;
+            }
 
-    completion_phrases = (
-        "measurement completed",
-        "measurement complete",
-        "measurement finished",
-        "measurement is done",
-        "measurement done",
-        "results are available",
-        "measurement results",
+            const style = window.getComputedStyle(element);
+
+            return (
+                style.display !== "none" &&
+                style.visibility !== "hidden" &&
+                style.opacity !== "0" &&
+                element.getClientRects().length > 0
+            );
+        };
+
+        const text =
+            document.body.innerText.toLowerCase();
+
+        const completionPhrases = [
+            "measurement completed",
+            "measurement complete",
+            "measurement finished",
+            "results are ready",
+            "recommended resolver",
+            "measurement results"
+        ];
+
+        if (
+            completionPhrases.some(
+                phrase => text.includes(phrase)
+            )
+        ) {
+            return true;
+        }
+
+        const progressElements = [
+            ...document.querySelectorAll(
+                '[role="progressbar"], ' +
+                'progress, ' +
+                '[class*="progress"], ' +
+                '[class*="loading"], ' +
+                '[class*="spinner"], ' +
+                '[aria-busy="true"]'
+            )
+        ].filter(visible);
+
+        const resultElements = [
+            ...document.querySelectorAll(
+                '[data-testid*="result"], ' +
+                '[data-testid*="recommend"], ' +
+                '[class*="result"], ' +
+                '[class*="recommend"], ' +
+                '[id*="result"], ' +
+                'table tbody tr'
+            )
+        ].filter(element => {
+            return (
+                visible(element) &&
+                (
+                    element.innerText || ""
+                ).trim().length > 0
+            );
+        });
+
+        return (
+            progressElements.length === 0 &&
+            resultElements.length > 0
+        );
+        """
     )
 
-    if any(phrase in body_text for phrase in completion_phrases):
-        return True
 
-    # Some applications show their results without explicit completion text.
-    result_selectors = [
-        "[data-testid*='result']",
-        "[class*='result']",
-        "[id*='result']",
-        "[data-testid*='complete']",
-        "[class*='complete']",
-        "[id*='complete']",
-    ]
+def wait_for_measurement(driver):
+    print(
+        f"Waiting up to {TIMEOUT} seconds "
+        "for measurement completion...",
+        flush=True,
+    )
 
-    for selector in result_selectors:
-        for element in driver.find_elements(By.CSS_SELECTOR, selector):
-            try:
-                if element.is_displayed() and element.text.strip():
-                    return True
-            except Exception:
-                continue
+    started_at = time.monotonic()
 
-    return False
+    while True:
+        elapsed = time.monotonic() - started_at
+
+        if measurement_finished(driver):
+            print(
+                f"Measurement completed after "
+                f"{elapsed:.0f} seconds.",
+                flush=True,
+            )
+            return
+
+        if elapsed >= TIMEOUT:
+            dump_diagnostics(driver)
+            dump_page_source(
+                driver,
+                "measurement-timeout.html",
+            )
+            save_screenshot(
+                driver,
+                "measurement-timeout.png",
+            )
+
+            raise TimeoutException(
+                f"Measurement did not finish "
+                f"within {TIMEOUT} seconds."
+            )
+
+        if int(elapsed) % 10 == 0:
+            print(
+                f"Measurement still running: "
+                f"{elapsed:.0f}s",
+                flush=True,
+            )
+
+        time.sleep(1)
 
 
-def save_screenshot(driver, filename):
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = OUTPUT_DIR / filename
-    driver.save_screenshot(str(path))
-    print(f"Screenshot saved to {path}", flush=True)
-
-
-def main():
+def create_driver():
     options = Options()
-    options.add_argument("-headless")
-    options.set_preference("browser.cache.disk.enable", False)
-    options.set_preference("browser.cache.memory.enable", False)
 
-    options.binary_location = "/usr/bin/firefox-esr"
+    options.add_argument(
+        "-headless"
+    )
+
+    options.binary_location = (
+        "/usr/bin/firefox-esr"
+    )
+
+    #
+    # Disable unnecessary Firefox services.
+    #
+    options.set_preference(
+        "browser.shell.checkDefaultBrowser",
+        False,
+    )
+
+    options.set_preference(
+        "browser.startup.page",
+        0,
+    )
+
+    options.set_preference(
+        "browser.newtabpage.enabled",
+        False,
+    )
+
+    options.set_preference(
+        "browser.newtabpage.activity-stream.enabled",
+        False,
+    )
+
+    options.set_preference(
+        "browser.newtabpage.activity-stream.feeds.system.topsites",
+        False,
+    )
+
+    options.set_preference(
+        "browser.newtabpage.activity-stream.feeds.topsites",
+        False,
+    )
+
+    options.set_preference(
+        "browser.newtabpage.activity-stream.feeds.telemetry",
+        False,
+    )
+
+    options.set_preference(
+        "browser.newtabpage.activity-stream.telemetry",
+        False,
+    )
+
+    options.set_preference(
+        "datareporting.healthreport.uploadEnabled",
+        False,
+    )
+
+    options.set_preference(
+        "datareporting.policy.dataSubmissionEnabled",
+        False,
+    )
+
+    options.set_preference(
+        "toolkit.telemetry.enabled",
+        False,
+    )
+
+    #
+    # Do not block application network resources.
+    #
+    options.set_preference(
+        "privacy.trackingprotection.enabled",
+        False,
+    )
+
+    options.set_preference(
+        "privacy.trackingprotection.pbmode.enabled",
+        False,
+    )
+
+    options.set_preference(
+        "network.cookie.cookieBehavior",
+        0,
+    )
+
+    #
+    # Container/headless rendering.
+    #
+    options.set_preference(
+        "gfx.webrender.software",
+        True,
+    )
+
+    options.set_preference(
+        "devtools.console.stdout.content",
+        True,
+    )
+
     service = Service(
         executable_path="/usr/local/bin/geckodriver",
         log_output=sys.stdout,
     )
 
-    driver = webdriver.Firefox(
+    return webdriver.Firefox(
         service=service,
         options=options,
     )
 
+
+def main():
+    print(
+        f"Configured measurement timeout: {TIMEOUT}s",
+        flush=True,
+    )
+
+    driver = create_driver()
+
     try:
-        driver.set_page_load_timeout(60)
-        driver.set_window_size(1440, 1200)
-
-        print(f"Opening {URL}", flush=True)
-        driver.get(URL)
-
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        driver.set_page_load_timeout(
+            60
         )
 
-        click_opt_in(driver)
-        click_start_measurement(driver)
+        driver.set_window_size(
+            1440,
+            1200,
+        )
 
         print(
-            f"Waiting up to {TIMEOUT} seconds for completion...",
+            f"Opening {URL}",
             flush=True,
         )
 
+        driver.get(URL)
+
+        #
+        # Wait until the page itself has loaded.
+        #
         WebDriverWait(
             driver,
-            TIMEOUT,
-            poll_frequency=1,
-        ).until(measurement_finished)
+            60,
+        ).until(
+            lambda d: d.execute_script(
+                "return document.readyState"
+            )
+            == "complete"
+        )
 
-        print("Measurement completed successfully.", flush=True)
-        save_screenshot(driver, "measurement-result.png")
-
-    except Exception as error:
         print(
-            f"Measurement failed: {type(error).__name__}: {error}",
+            f"Loaded: {driver.current_url}",
+            flush=True,
+        )
+
+        print(
+            f"Page title: {driver.title}",
+            flush=True,
+        )
+
+        #
+        # Install JS error recording for later diagnostics.
+        #
+        install_error_recorder(driver)
+
+        print(
+            "Waiting for application controls...",
+            flush=True,
+        )
+
+        try:
+            WebDriverWait(
+                driver,
+                120,
+                poll_frequency=1,
+            ).until(
+                application_is_ready
+            )
+
+        except TimeoutException:
+            dump_diagnostics(driver)
+
+            dump_page_source(
+                driver,
+                "initialization-error.html",
+            )
+
+            save_screenshot(
+                driver,
+                "initialization-error.png",
+            )
+
+            raise TimeoutException(
+                "The page loaded, but the "
+                "measurement application did not "
+                "render its controls."
+            )
+
+        print(
+            "Application initialized.",
+            flush=True,
+        )
+
+        #
+        # 1. Opt in
+        #
+        click_opt_in(driver)
+
+        #
+        # Give the UI a moment to update.
+        #
+        time.sleep(1)
+
+        #
+        # 2. Start measurement
+        #
+        click_start_measurement(driver)
+
+        #
+        # 3. Wait for completion
+        #
+        wait_for_measurement(driver)
+
+        #
+        # 4. Save final state
+        #
+        save_screenshot(
+            driver,
+            "measurement-result.png",
+        )
+
+        dump_page_source(
+            driver,
+            "measurement-result.html",
+        )
+
+        print(
+            "Done.",
+            flush=True,
+        )
+
+    except KeyboardInterrupt:
+        print(
+            "Interrupted by user/container.",
             file=sys.stderr,
             flush=True,
         )
 
         try:
-            save_screenshot(driver, "measurement-error.png")
+            save_screenshot(
+                driver,
+                "measurement-interrupted.png",
+            )
+
+            dump_page_source(
+                driver,
+                "measurement-interrupted.html",
+            )
+        except Exception:
+            pass
+
+        sys.exit(130)
+
+    except Exception as error:
+        print(
+            f"Measurement failed: "
+            f"{type(error).__name__}: "
+            f"{error}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+        try:
+            save_screenshot(
+                driver,
+                "measurement-error.png",
+            )
+
+            dump_page_source(
+                driver,
+                "measurement-error.html",
+            )
+
+            dump_diagnostics(
+                driver
+            )
         except Exception:
             pass
 
