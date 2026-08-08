@@ -33,6 +33,7 @@ export default function Header({ theme, onToggleTheme, expertMode, onToggleExper
             <SlidersHorizontal size={15} />
             <span className="hidden sm:inline">Advanced</span>
           </button>
+          <a href="/probe-hosting.html" class="btn btn-sm gap-2">Host a Probe</a>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
       </div>

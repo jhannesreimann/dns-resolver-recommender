@@ -260,64 +260,40 @@ export default function App() {
       />
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
-        <AnimatePresence mode="wait">
+        <div>
           {!started ? (
-            <motion.div
-              key="hero"
-              className="flex min-h-[65vh] flex-col items-center justify-center"
-              exit={{ y: -30, opacity: 0, transition: { duration: 0.3 } }}
-            >
-              <motion.h1
-                className="mb-4 text-center text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.1 }}
-              >
+            <div className="flex min-h-[65vh] flex-col items-center justify-center">
+              <h1 className="mb-4 text-center text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
                 <span className="text-base-content">DNS Resolver </span>
                 <span className="bg-gradient-to-r from-primary via-secondary to-primary bg-[length:200%_100%] bg-clip-text text-transparent motion-preset-shimmer">
                   Recommender
                 </span>
-              </motion.h1>
-              <motion.p
-                className="mx-auto mb-7 max-w-xl text-center text-base leading-relaxed text-base-content/60 sm:text-lg"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.25 }}
-              >
+              </h1>
+              <p className="mx-auto mb-7 max-w-xl text-center text-base leading-relaxed text-base-content/60 sm:text-lg">
                 Measure and compare 200+ public DNS-over-HTTPS resolvers directly from your
                 browser. Find the right balance of speed, privacy, and security for your
                 connection.
-              </motion.p>
-              <motion.div
-                className="flex flex-col items-center gap-4"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.4 }}
-              >
+              </p>
+              <div>
                 <StartButton running={running} onStart={run} />
-                <div className="flex flex-col items-center gap-1">
-                  <label className="flex cursor-pointer items-center gap-2 text-xs text-base-content/60">
-                    <input
-                      type="checkbox"
-                      checked={optIn}
-                      onChange={(e) => setOptIn(e.target.checked)}
-                      className="checkbox checkbox-primary checkbox-sm"
-                    />
-                    Share anonymized results with HPI for research.
-                  </label>
-                  <a href="/privacy.html" className="link link-primary text-[11px]">
-                    See our data collection disclosure for details.
-                  </a>
-                </div>
-              </motion.div>
-            </motion.div>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-base-content/60">
+                  <input
+                    type="checkbox"
+                    checked={optIn}
+                    onChange={(e) => setOptIn(e.target.checked)}
+                    className="checkbox checkbox-primary checkbox-sm"
+                  />
+                  Share anonymized results with HPI for research.
+                </label>
+                <a href="/privacy.html" className="link link-primary text-[11px]">
+                  See our data collection disclosure for details.
+                </a>
+              </div>
+            </div>
           ) : (
-            <motion.div
-              key="results"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.3 }}
-            >
+            <div>
               <div className="mb-5 flex items-center justify-between gap-3">
                 <div>
                   <h1 className="text-xl font-semibold text-base-content sm:text-2xl">Results</h1>
@@ -372,9 +348,9 @@ export default function App() {
               )}
 
               <Methodology />
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
+        </div>
       </main>
 
       <Footer />
