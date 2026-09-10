@@ -122,7 +122,7 @@ export default function PrivacyPage() {
         <div className="collapse collapse-arrow mb-4 border border-base-300 bg-base-100">
           <input type="checkbox" />
           <div className="collapse-title text-sm font-semibold text-base-content/80">
-            Per resolver (102 rows in the{' '}
+            Per resolver (1 row per resolver in the{' '}
             <code className="rounded bg-base-200 px-1 py-0.5 text-[12px]">measurements</code> table)
           </div>
           <div className="collapse-content">
