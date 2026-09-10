@@ -5,15 +5,14 @@ deploy-frontend:
   stage: deploy
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      changes:
-        - src/frontend/**/*
   tags:
     - deploy-vm
   script:
     - cd src/frontend
     # 1. Build the static bundle. The Rust->WASM engine is vendored into
     #    src/frontend/src/wasm, so no Rust toolchain is needed on the runner.
-    - nvm use 22.12
+    - echo $(which npm)
+    - echo $(which node)
     - npm ci
     - npm run build
     # 2. Copy the resulting frontend files to the nginx directory
