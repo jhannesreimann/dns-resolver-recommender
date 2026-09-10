@@ -8,6 +8,7 @@ deploy-frontend:
   tags:
     - deploy-vm
   script:
+    - echo $USER
     - cd src/frontend
     # 1. Build the static bundle. The Rust->WASM engine is vendored into
     #    src/frontend/src/wasm, so no Rust toolchain is needed on the runner.
