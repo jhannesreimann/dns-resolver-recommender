@@ -1,11 +1,12 @@
 stages:
   - deploy
 
+job:
+  tags:
+    - deploy-vm
+
 deploy-frontend:
   stage: deploy
-  # Node image so we can build the Vite app. It is Debian-based, so the shared
-  # ssh_setup (which apt-get installs openssh-client) works unchanged.
-  image: node:22-bookworm
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes:
@@ -19,4 +20,3 @@ deploy-frontend:
     # 2. Copy the resulting frontend files to the nginx directory
     - rm -rf /data/www/*
     - cp -r ./dist/* /data/www/
-
