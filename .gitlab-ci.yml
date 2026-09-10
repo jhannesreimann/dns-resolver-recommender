@@ -13,6 +13,7 @@ deploy-frontend:
     - cd src/frontend
     # 1. Build the static bundle. The Rust->WASM engine is vendored into
     #    src/frontend/src/wasm, so no Rust toolchain is needed on the runner.
+    - nvm use 22.12
     - npm ci
     - npm run build
     # 2. Copy the resulting frontend files to the nginx directory
