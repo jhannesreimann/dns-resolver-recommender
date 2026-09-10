@@ -7,7 +7,7 @@ deploy-frontend:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes:
         - src/frontend/**/*
-  tag:
+  tags:
     - deploy-vm
   script:
     - cd src/frontend
