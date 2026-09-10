@@ -18,3 +18,17 @@ deploy-frontend:
     # 2. Copy the resulting frontend files to the nginx directory
     - rm -rf /data/www/*
     - cp -r ./dist/* /data/www/
+
+deploy-backend:
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  tags:
+    - deploy-vm
+  script:
+    - systemctl stop dohbench.service
+    - cd src/backend
+    - rm -rf /deploy/*
+    - cp * /deploy/
+    - uv sync
+    - systemctl start dohbench.service
