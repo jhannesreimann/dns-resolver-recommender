@@ -1,16 +1,14 @@
 stages:
   - deploy
 
-job:
-  tags:
-    - deploy-vm
-
 deploy-frontend:
   stage: deploy
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes:
         - src/frontend/**/*
+  tag:
+    - deploy-vm
   script:
     - cd src/frontend
     # 1. Build the static bundle. The Rust->WASM engine is vendored into
