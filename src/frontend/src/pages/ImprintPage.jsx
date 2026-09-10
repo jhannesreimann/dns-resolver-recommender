@@ -9,7 +9,7 @@ export default function ImprintPage() {
           className="btn btn-outline btn-sm mb-6 gap-1.5 border-base-300 text-base-content/70"
         >
           <ArrowLeft size={14} />
-          Back to DNS Resolver Recommender
+          Back to DoH Bench
         </a>
 
         <h1 className="mb-6 text-2xl font-semibold text-base-content">Imprint</h1>
