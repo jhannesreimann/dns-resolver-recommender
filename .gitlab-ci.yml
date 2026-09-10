@@ -20,15 +20,3 @@ deploy-frontend:
     - rm -rf /data/www/*
     - cp -r ./dist/* /data/www/
 
-deploy-backend:
-  stage: deploy
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      changes:
-        - src/backend/**/*
-  script:
-    - cd src/deploy
-    - sudo systemctl stop dohbench
-    - rm -rf /deploy/*
-    - cp -r * /deploy
-    - sudo syttemctl start dohbench
