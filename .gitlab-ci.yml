@@ -27,9 +27,9 @@ deploy-backend:
   tags:
     - deploy-vm
   script:
-    - systemctl stop dohbench.service
+    - /usr/bin/systemctl stop dohbench.service
     - cd src/backend
     - rm -rf /deploy/*
     - cp * /deploy/
     - uv sync
-    - systemctl start dohbench.service
+    - /usr/bin/systemctl start dohbench.service
