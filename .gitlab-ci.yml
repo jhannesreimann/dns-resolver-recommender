@@ -30,6 +30,6 @@ deploy-backend:
     - sudo -n /usr/bin/systemctl stop dohbench.service
     - cd src/backend
     - rm -rf /deploy/*
-    - cp * /deploy/
+    - cp -r * /deploy/
     - uv sync
     - sudo -n /usr/bin/systemctl start dohbench.service
